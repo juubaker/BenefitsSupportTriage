@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "bradlc.vscode-tailwindcss",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "usernamehw.errorlens",
+    "dsznajder.es7-react-js-snippets",
+    "christian-kohler.path-intellisense",
+    "mikestead.dotenv",
+    "vitest.explorer"
+  ]
+}

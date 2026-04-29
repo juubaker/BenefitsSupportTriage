@@ -1,0 +1,46 @@
+{
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false,
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+
+  "javascript.preferences.importModuleSpecifier": "relative",
+  "javascript.updateImportsOnFileMove.enabled": "always",
+
+  "tailwindCSS.includeLanguages": {
+    "javascript": "javascript",
+    "javascriptreact": "javascriptreact"
+  },
+  "tailwindCSS.experimental.classRegex": [
+    ["clsx\\(([^)]*)\\)", "(?:'|\"|`)([^'\"`]*)(?:'|\"|`)"]
+  ],
+
+  "eslint.validate": ["javascript", "javascriptreact"],
+
+  "vitest.enable": true,
+  "vitest.commandLine": "npm run test --",
+
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/coverage": true,
+    "**/.env": true
+  },
+
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "package.json": "package-lock.json, .npmrc, .nvmrc, .node-version",
+    ".env.example": ".env, .env.*",
+    "vite.config.js": "vite.config.*, postcss.config.*, tailwind.config.*, vitest.config.*",
+    "README.md": "LICENSE, CHANGELOG.md, CONTRIBUTING.md",
+    ".eslintrc.json": ".eslintrc.*, .prettierrc.*, .editorconfig",
+    "eslint.config.js": "eslint.config.*, .prettierrc.*, .editorconfig",
+    "*.js": "${capture}.test.js, ${capture}.spec.js",
+    "*.jsx": "${capture}.test.jsx, ${capture}.spec.jsx"
+  }
+}

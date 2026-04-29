@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: triage-postgres
+    restart: unless-stopped
+    ports:
+      # Host:Container — host is 5433 to avoid colliding with a native
+      # Postgres install on the default port. The container still listens
+      # on 5432 internally; only the published port differs.
+      - '5433:5432'
+    environment:
+      POSTGRES_USER: triage
+      POSTGRES_PASSWORD: triage
+      POSTGRES_DB: triage
+    volumes:
+      - triage-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U triage -d triage']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Optional: a web UI for the DB at http://localhost:8080
+  # Skip with: docker compose up -d postgres
+  adminer:
+    image: adminer:4
+    container_name: triage-adminer
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  triage-pgdata:
