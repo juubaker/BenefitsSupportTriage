@@ -7,7 +7,8 @@ generates an AI-drafted reply for open posts.
 ## Stack
 
 - **Client** — React 18, Vite 5, Tailwind CSS 3, Manrope + Fraunces + JetBrains Mono
-- **Server** — Node 20+, Express 4, raw `fetch` against the Anthropic Messages API
+- **Server** — Node 20+, Express 4, swappable LLM provider abstraction
+- **AI** — Anthropic API (cloud) or Ollama (local) via a uniform `LLMProvider` interface
 - **Database** — PostgreSQL 16, [Drizzle ORM](https://orm.drizzle.team/) + drizzle-kit migrations, `node-postgres` pool
 - **Tests** — Vitest 2, Testing Library, happy-dom, supertest
 - **Models** — Haiku for fast classification, Sonnet for the drafted response (configurable)
@@ -45,20 +46,14 @@ still works for a quick demo.
 │  (Vite)     │  /api/draft        │  /api/health │
 └──────┬──────┘──────────────────► └──────┬───────┘
        │                                  │
-       │                                  │ ┌──────────────┐
-       │                                  ├►│  repositories│
-       │                                  │ │  (Drizzle)   │
-       │                                  │ └──────┬───────┘
-       │                                  │        ▼
-       │                                  │ ┌──────────────┐
-       │                                  │ │  PostgreSQL  │
-       │                                  │ │  (docker)    │
-       │                                  │ └──────────────┘
-       │                                  ▼
-       │                            ┌────────────────┐
-       │                            │  Anthropic API │
-       │                            │  Haiku/Sonnet  │
-       │                            └────────────────┘
+       │                                  ├──► repositories (Drizzle) ──► PostgreSQL
+       │                                  │
+       │                                  └──► LLMProvider ──┬─► Anthropic (cloud)
+       │                                                     └─► Ollama   (local)
+       │
+       └─ Swappable via LLM_PROVIDER env var. Cache key is
+          (content_hash, provider:model) so swaps invalidate
+          stale entries automatically.
 ```
 
 **Cache flow on POST /api/categorize:**
@@ -70,7 +65,101 @@ still works for a quick demo.
 This means duplicate or near-duplicate questions don't hit Anthropic twice.
 The `categorizations` table doubles as the audit log.
 
-## Database
+## LLM providers
+
+The route layer is provider-agnostic. The two routes can use the **same**
+provider (the common case) or **different** ones — Ollama for cheap local
+classification, Anthropic for higher-quality drafts. A registry resolves
+which adapter sits behind each route based on env vars; swapping is a
+config change, not a code change.
+
+Two adapters ship today:
+
+| Provider | Network | Cost | API key | Use case |
+|---|---|---|---|---|
+| `anthropic` | Cloud | Per-token | Required | Production quality |
+| `ollama` | Local | Free | None | Offline dev, demos, CI |
+
+### Configuration
+
+Resolution per route:
+
+```
+/api/categorize  →  LLM_PROVIDER_TRIAGE  →  LLM_PROVIDER  →  'anthropic'
+/api/draft       →  LLM_PROVIDER_DRAFT   →  LLM_PROVIDER  →  'anthropic'
+```
+
+Three common shapes:
+
+```bash
+# 1. Everything on Anthropic (default)
+LLM_PROVIDER=anthropic
+
+# 2. Everything local — no API key needed, no network calls
+LLM_PROVIDER=ollama
+
+# 3. Mixed — cheap local classify, quality cloud draft
+LLM_PROVIDER_TRIAGE=ollama
+LLM_PROVIDER_DRAFT=anthropic
+```
+
+The active config for each route is reported by `GET /api/health` and
+logged on server startup, so you can confirm the swap took effect.
+
+### Switching to Ollama (local, free)
+
+```bash
+# 1. Install Ollama
+brew install ollama          # macOS
+# or download from https://ollama.com/download
+
+# 2. Pull a model (one-time, ~5 GB)
+ollama pull qwen2.5:7b       # general-purpose, recommended
+# or  ollama pull llama3.2:3b   # smaller, faster on modest hardware
+
+# 3. Start the runtime (the macOS app does this automatically)
+ollama serve
+
+# 4. Configure the project
+echo "LLM_PROVIDER=ollama" >> .env
+
+# 5. Restart the app — no code changes
+npm run dev
+```
+
+### How the cache stays correct across swaps
+
+The `categorizations` table stores `model` as `<provider>:<model>` —
+e.g. `anthropic:claude-haiku-4-5-20251001` or `ollama:qwen2.5:7b`. The
+cache lookup keys on this prefixed value, so swapping providers does
+not return cached results from a different one. Old entries remain in
+the table for audit; they're just bypassed.
+
+This also means **per-route swaps stay correct**: if `/api/categorize`
+moves from Ollama to Anthropic mid-session, the next request misses
+the old Ollama cache and produces a fresh Anthropic categorization.
+
+### Adding a new provider
+
+Three steps:
+
+1. Create `server/llm/myprovider.js` that exports `createMyProvider(env)`
+   returning `{ name, triageModel, draftModel, classify, draft }`.
+2. Register it in `server/llm/index.js`:
+   ```js
+   const FACTORIES = {
+     anthropic: createAnthropicProvider,
+     ollama: createOllamaProvider,
+     myprovider: createMyProvider,  // ← add here
+   };
+   ```
+3. Add adapter tests in `server/llm/myprovider.test.js`. Use the existing
+   `anthropic.test.js` and `ollama.test.js` as templates — both stub
+   `global.fetch`, so no real API calls are made.
+
+The route layer needs no changes.
+
+
 
 ### Schema
 
