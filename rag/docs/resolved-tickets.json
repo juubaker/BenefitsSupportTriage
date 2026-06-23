@@ -1,0 +1,17 @@
+[
+  {
+    "caseText": "I just got married last week. Can I add my spouse to my medical plan now, or do I have to wait until open enrollment?",
+    "category": "Life Event",
+    "approvedResponse": "Congratulations! Marriage is a qualifying life event, so you don't have to wait for open enrollment. You have 31 days from your wedding date to add your spouse. You'll need to submit a copy of your marriage certificate along with the enrollment change. If you'd like, I can point you to the enrollment form."
+  },
+  {
+    "caseText": "My daughter is turning 26 in March. How long can she stay on my health insurance?",
+    "category": "Dependent Coverage",
+    "approvedResponse": "Your daughter can remain on your plan through the end of the month in which she turns 26. Since her birthday is in March, her coverage would continue through March 31. After that she'd need to find other coverage, and she may qualify for COBRA continuation — let me know if you'd like details on that."
+  },
+  {
+    "caseText": "I work about 25 hours a week. Am I able to sign up for the medical plan?",
+    "category": "Eligibility",
+    "approvedResponse": "Medical coverage is available to employees working 30 or more hours per week. At 25 hours you wouldn't be eligible for the medical plan, but you may be eligible for some voluntary benefits. I can share which voluntary options are open to part-time employees if that's helpful."
+  }
+]

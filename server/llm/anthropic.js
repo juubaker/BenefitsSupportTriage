@@ -72,5 +72,15 @@ export function createAnthropicProvider(env = process.env) {
         maxTokens: 600,
       });
     },
+  async draftGrounded({ system, user }) {
+      requireKey();
+      return callAnthropic({
+        apiKey,
+        model: draftModel,
+        system,
+        prompt: user,
+        maxTokens: 1024,
+      });
+    },
   };
 }

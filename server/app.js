@@ -16,7 +16,9 @@ import cors from 'cors';
 import * as defaultPostsRepo from './db/repositories/posts.js';
 import * as defaultCategorizationsRepo from './db/repositories/categorizations.js';
 import * as defaultDraftsRepo from './db/repositories/drafts.js';
+import * as defaultRagRepo from './db/repositories/rag.js';          // ← add
 import { createProviders, extractJson } from './llm/index.js';
+import { runGroundedDraft } from './rag/groundedDraft.js';            // ← add
 
 // The fixed taxonomy. Keep this in sync with src/lib/categories.js on the client.
 export const CATEGORIES = [
@@ -44,6 +46,7 @@ export function createApp({
   postsRepo = defaultPostsRepo,
   categorizationsRepo = defaultCategorizationsRepo,
   draftsRepo = defaultDraftsRepo,
+  ragRepo = defaultRagRepo,          // ← add
   providers = null,
   llmProvider = null,
 } = {}) {
@@ -196,5 +199,34 @@ export function createApp({
     }
   });
 
+  // ---- Grounded draft (RAG) ----------------------------------------------
+
+  app.post('/api/draft/grounded', async (req, res) => {
+    try {
+      const { postId, title, body } = req.body ?? {};
+      if (!title || !body) {
+        return res.status(400).json({ error: 'title and body are required' });
+      }
+
+      const { draft } = getProviders();
+      const caseText = `${title}\n\n${body}`;
+
+      const result = await runGroundedDraft({ caseText, provider: draft, ragRepo });
+
+      // Persist only real drafts (not abstentions), same as /api/draft.
+      if (!result.abstained && postId) {
+        await draftsRepo.recordDraft({
+          postId,
+          content: result.draft,
+          model: `${draft.name}:${draft.draftModel}`,
+        });
+      }
+
+      res.json({ ...result, provider: draft.name });
+    } catch (e) {
+      console.error('[draft.grounded]', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
   return app;
 }

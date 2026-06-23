@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16  # was pg18 — match your original Postgres 16
     container_name: triage-postgres
     restart: unless-stopped
     ports:
