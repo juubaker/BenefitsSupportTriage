@@ -1,290 +1,291 @@
-# Benefits Support Triage — Run & Test Guide
+# RUNBOOK — Benefits Support Triage Agent + RAG (integrated)
 
-## What this project is
+Setup and operations for the version where the RAG layer is wired into the live
+app: grounded drafts through the provider abstraction, retrieval as a repository,
+citation verification, abstention, and the reviewer panel. This supersedes the
+standalone-scaffold runbook.
 
-An Oracle HCM Cloud Benefits support triage tool. Incoming support posts are
-classified against a fixed Benefits taxonomy (Life Events, Open Enrollment,
-COBRA, ACA Compliance, etc.) and either matched to an existing resolved
-response or used to generate an AI-drafted reply. Built as a working agent
-tool that could plug into Oracle's AI Agent framework or Anthropic's tool-use API.
+If you only need the corpus/ingest mechanics, see `rag/RUNBOOK.md`. This document
+covers the whole running system.
 
-The architecture deliberately demonstrates a few production patterns:
+---
 
-- A persistence layer keyed on a content hash, so duplicate questions don't
-  hit the LLM twice. The `categorizations` table doubles as both cache and
-  audit log.
-- A repository pattern between Express routes and Drizzle, so endpoint tests
-  inject mocks instead of needing a live database.
-- A taxonomy gate: any model output outside the fixed category list is
-  rejected with a 422 before persistence. The LLM cannot pollute the data
-  model with hallucinated categories.
-- A graceful fallback: if Postgres is unreachable the UI loads from seed
-  data and shows a "Demo mode" banner, so the project demos on any laptop.
+## 1. Architecture at a glance
 
-## Stack at a glance
-
-| Layer | Technology |
-|---|---|
-| Client | React 18, Vite 7, Tailwind CSS 3 |
-| Server | Node 20+, Express 4 |
-| Database | PostgreSQL 16, Drizzle ORM 0.45, drizzle-kit migrations |
-| Tests | Vitest 3, Testing Library, happy-dom, Supertest |
-| AI | Anthropic API — Haiku for triage, Sonnet for drafting |
-| Local infra | Docker Compose (Postgres + Adminer) |
-
-## Prerequisites
-
-Verify these are installed before starting:
-
-```bash
-node --version       # need v20+
-npm --version
-docker --version     # Docker Desktop, OrbStack, or Colima
-```
-
-You also need an Anthropic API key from https://console.anthropic.com/settings/keys.
-Without it the UI still loads but the categorize/draft buttons return 500.
-
-## Running the project
-
-From the project root:
-
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Configure
-cp .env.example .env
-# Open .env in any editor and paste your ANTHROPIC_API_KEY
-
-# 3. Start Postgres, run migrations, seed the database
-npm run db:setup
-
-# 4. Run client + server together
-npm run dev
-```
-
-Open http://localhost:5173 in a browser. The terminal will show two
-interleaved streams of output prefixed `[server]` and `[client]`.
-
-To stop: `Ctrl+C` in the terminal. To shut down the database container as
-well, run `npm run db:down`.
-
-### What `npm run db:setup` does
-
-It is a chain of four commands:
-
-```
-db:up      → docker compose up -d postgres   (boots a Postgres container)
-db:wait    → polls until Postgres accepts connections
-db:migrate → drizzle-kit migrate              (creates the 3 tables)
-db:seed    → loads the 10 seed support posts
-```
-
-If the database is already running, the chain is idempotent — `db:up` is a
-no-op, migrations skip if applied, and the seed uses `INSERT ... ON CONFLICT
-DO UPDATE` so reseeding is safe.
-
-### What you should see when it works
-
-The browser shows a triage console with three panes: filters and stats on
-the left, the post queue in the middle, and a detail view on the right.
-Five posts arrive pre-categorized (the answered ones, with their resolved
-responses visible). Five arrive uncategorized.
-
-Click "Categorize 5 new" in the header — the agent classifies all five
-against the taxonomy in parallel. Open posts now show a "Generate draft
-response" button that calls the LLM with a system prompt grounded in
-Oracle HCM Benefits configuration tasks.
-
-Refresh the page. Categorizations and drafts persist — they came back
-from Postgres, not memory.
-
-## Database inspection
-
-If you want to look at the data directly:
-
-**Adminer** — a lightweight web UI for the database:
-
-http://localhost:8080
-- System: PostgreSQL
-- Server: postgres
-- Username: triage
-- Password: triage
-- Database: triage
-
-**Drizzle Studio** — Drizzle's own browser-based editor:
-
-```bash
-npm run db:studio
-```
-
-Opens https://local.drizzle.studio in your browser.
-
-After running through the UI once, you should see ten rows in `posts`,
-five seed entries in `categorizations` plus any new ones you triggered,
-and one row in `drafts` per post you generated a draft for.
-
-## Testing
-
-The test suite covers every layer with appropriate isolation. Every test
-runs in under 30 seconds end-to-end and never touches the network.
-
-```bash
-npm test               # one-shot run of every test
-npm run test:watch     # watch mode (re-runs on file change)
-npm run test:ui        # browser-based runner at http://localhost:51204
-npm run test:coverage  # coverage report into ./coverage/
-npm run test:server    # only server-side tests
-npm run test:client    # only client-side tests
-```
-
-### Expected output
-
-```
-Test Files  7 passed | 1 skipped (8)
-     Tests  85 passed | 6 skipped (91)
-```
-
-The skipped tests are the live-database integration tests in
-`server/db/repositories/integration.test.js`. They opt in via an environment
-variable, see the next section.
-
-### What's tested at each layer
-
-| Layer | File | What it tests |
+| Component | Where | Notes |
 |---|---|---|
-| Server endpoints | `server/app.test.js` | Route contracts, request validation, taxonomy enforcement (422 on off-taxonomy categories), upstream API error handling, cache hit/miss behavior, persistence boundaries |
-| Repository unit | `server/db/repositories/categorizations.test.js` | Content hashing — determinism, boundary sensitivity |
-| Repository integration | `server/db/repositories/integration.test.js` | Real Postgres round-trips — upsert, latest-cat join via window function, cache lookup, cascade delete. Skipped unless `TEST_DATABASE_URL` is set |
-| Client API | `src/lib/api.test.js` | Fetch wrappers — request shape, error handling for both JSON and text error bodies |
-| Taxonomy | `src/lib/categories.test.js` | Schema invariants — uniqueness, helper lookup correctness |
-| Seed data | `src/data/seedPosts.test.js` | Data integrity — required fields, ID uniqueness, answered/open consistency, valid `seedCategory` references |
-| UI primitives | `src/components/ui.test.jsx` | CategoryChip, ConfidenceBar, StatusDot, StatBlock, FilterRow rendering and event handling |
-| Integration | `src/components/BenefitsSupportTriage.test.jsx` | Loading state, API fetch, fallback on API failure, filtering, post selection, draft generation, batch categorization, off-taxonomy rejection at the UI layer |
+| App server (Express) | `server/` | `createApp`, provider abstraction, repositories. Default port **3001** |
+| React client (Vite) | `src/` | Three-pane reviewer UI |
+| Postgres + pgvector | Docker container `triage-postgres` | Image `pgvector/pgvector:pg16`. Host port **5433** → container 5432 |
+| RAG schema/ingest | `rag/` subfolder | Own `package.json` (CommonJS), Drizzle, `scripts/ingest.ts` |
+| Embeddings | Ollama, `localhost:11434` | `nomic-embed-text` (768-dim) — must match between ingest and query |
+| Draft LLM | per `LLM_PROVIDER` | Anthropic or Ollama, via `providers.draft.draftGrounded()` |
 
-### Test isolation strategy
+**Grounded-draft request flow:**
 
-The endpoint tests inject mock repositories into `createApp()`. They never
-touch a real Postgres. The component tests mock `src/lib/api.js`. They
-never even hit the local Express server. Tests run in roughly two seconds
-of actual test time — the rest of the wall clock is Vitest setup and
-test-environment startup.
+```
+POST /api/draft/grounded { postId, title, body }
+  -> embed(title+body)                         server/rag/embed.js
+  -> ragRepo.searchPolicy / searchPrecedents   server/db/repositories/rag.js (pgvector)
+  -> abstain if top similarity < MIN_SIMILARITY
+  -> providers.draft.draftGrounded({system,user})   honors LLM_PROVIDER
+  -> verify [policy:id] citations ⊆ retrieved
+  -> draftsRepo.recordDraft + ragRepo.recordRetrievalLog
+  -> reviewer panel renders draft + chips + evidence
+```
 
-The integration tests against a real Postgres are gated on a separate env
-variable so they only run when explicitly requested:
+**Critical constants for this environment (memorize these — they caused most of
+the setup pain):**
+- DB connection is **port 5433**, not 5432: `postgresql://triage:triage@localhost:5433/triage`
+- Image must be `pgvector/pgvector:pg16` (stock `postgres` has no pgvector; `pg18` hits a data-dir mount change)
+- Ingest **appends** — re-running duplicates rows unless you truncate first
+
+---
+
+## 2. Prerequisites
+
+- Docker Desktop running
+- Node 20+
+- Ollama installed and running (`ollama serve`) with `nomic-embed-text` pulled
+- `psql` client (macOS: `brew install libpq && brew link --force libpq`)
+- Anthropic API key (only if `LLM_PROVIDER` includes `anthropic`)
+
+---
+
+## 3. One-time setup
+
+### 3.1 Database container (with pgvector)
+
+Confirm `docker-compose.yml` postgres service uses the pgvector image and host
+port 5433:
+
+```yaml
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: triage-postgres
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_USER: triage
+      POSTGRES_PASSWORD: triage
+      POSTGRES_DB: triage
+    volumes:
+      - triage-pgdata:/var/lib/postgresql/data
+```
+
+Start it:
 
 ```bash
-docker compose up -d postgres
-TEST_DATABASE_URL=postgresql://triage:triage@localhost:5433/triage_test \
-  npm run db:migrate
-TEST_DATABASE_URL=postgresql://triage:triage@localhost:5433/triage_test \
-  npx vitest run server/db/repositories/integration.test.js
+npm run db:up
+docker compose ps          # want: Up (healthy), 0.0.0.0:5433->5432/tcp
 ```
 
-This is a deliberate test-pyramid choice. Fast tests run on every save.
-Slow tests run when the schema changes or when validating Drizzle's SQL
-generation against a real database.
+### 3.2 Environment
 
-## Troubleshooting
+Set `DATABASE_URL` to **port 5433** in the root `.env` AND `rag/.env`:
 
-### Port 3001 already in use (`EADDRINUSE`)
+```
+DATABASE_URL=postgresql://triage:triage@localhost:5433/triage
+```
 
-A previous `npm run dev` left an orphaned Node process holding the port.
-Kill it:
+App `.env` also needs (per your provider setup):
+```
+PORT=3001
+LLM_PROVIDER=anthropic            # or ollama, or split LLM_PROVIDER_TRIAGE/DRAFT
+ANTHROPIC_API_KEY=...             # if any provider is anthropic
+OLLAMA_URL=http://localhost:11434
+OLLAMA_EMBED_MODEL=nomic-embed-text
+POLICY_K=5
+PRECEDENT_K=3
+MIN_SIMILARITY=0.45
+```
+
+### 3.3 App schema + seed
 
 ```bash
-lsof -ti :3001 | xargs kill
+npm run db:wait && npm run db:migrate && npm run db:seed
 ```
 
-Then `npm run dev` again.
-
-### Port 5433 conflicts with native Postgres
-
-The project uses port **5433** specifically to coexist with a native
-Postgres install on the default port 5432. If you have something else
-already on 5433, edit the host port in `docker-compose.yml` and update the
-matching port in `DATABASE_URL` in `.env`.
-
-### "role triage does not exist" during migration
-
-Means drizzle-kit connected to a Postgres other than the Docker container —
-typically a native Homebrew or Postgres.app install. Confirm with:
+### 3.4 Enable pgvector
 
 ```bash
-lsof -i :5433        # should show only com.docker
+set -a; source .env; set +a        # load DATABASE_URL into the shell
+psql "$DATABASE_URL" -f rag/db/0000_enable_pgvector.sql
+psql "$DATABASE_URL" -c "\dx vector"     # confirm vector is listed
 ```
 
-If you see a `postgres` process there too, stop it (`brew services stop
-postgresql` or close Postgres.app).
+### 3.5 RAG tables + corpus (from the rag/ subfolder)
 
-### Tests fail with "happy-dom is not installed"
-
-Re-run `npm install` — happy-dom is a dev dependency that may have been
-skipped if you used `npm install --production`.
-
-## Project layout
-
-```
-benefits-support-triage/
-├── docker-compose.yml             ← local Postgres + Adminer
-├── drizzle.config.js              ← drizzle-kit config
-├── eslint.config.js               ← ESLint 9 flat config
-├── vitest.config.js               ← test runner config
-│
-├── server/
-│   ├── app.js                     ← Express app factory (dependency-injectable)
-│   ├── app.test.js                ← endpoint tests with mock repos
-│   ├── index.js                   ← thin entry point — dotenv + listen
-│   └── db/
-│       ├── client.js              ← Drizzle + pg pool (singleton)
-│       ├── schema/index.js        ← table definitions + relations
-│       ├── migrations/            ← drizzle-kit generated SQL
-│       └── repositories/          ← data access — the test seam
-│           ├── posts.js
-│           ├── categorizations.js
-│           ├── drafts.js
-│           └── integration.test.js
-│
-├── src/
-│   ├── components/
-│   │   ├── BenefitsSupportTriage.jsx  ← top-level container
-│   │   ├── Header.jsx
-│   │   ├── Sidebar.jsx
-│   │   ├── PostList.jsx
-│   │   ├── PostDetail.jsx
-│   │   └── ui.jsx                 ← shared primitives
-│   ├── data/seedPosts.js          ← 10 realistic Benefits support posts
-│   └── lib/
-│       ├── api.js                 ← fetch wrappers
-│       └── categories.js          ← taxonomy single source of truth
-│
-├── scripts/
-│   ├── seed.js                    ← idempotent seed runner
-│   └── wait-for-db.js             ← polls Postgres readiness
-│
-└── .vscode/                       ← workspace-shared editor config
-    ├── settings.json
-    ├── extensions.json            ← recommended extensions
-    └── launch.json                ← debug configs for app + tests
+```bash
+cd rag
+npm install                        # rag/ has its own deps
+grep DATABASE_URL .env             # confirm :5433
+set -a; source .env; set +a
+npx drizzle-kit generate
+npx drizzle-kit migrate            # creates policy_chunks, resolved_tickets, retrieval_log
+ollama pull nomic-embed-text
+npm run ingest
+cd ..
 ```
 
-## What I'd do next given more time
+Verify:
+```bash
+psql "$DATABASE_URL" -c "SELECT count(*) FROM policy_chunks;"     # > 0
+psql "$DATABASE_URL" -c "SELECT count(*) FROM resolved_tickets;"  # > 0
+```
 
-Items deliberately out of scope for this build but worth flagging:
+### 3.6 Integration code (one-time)
 
-- **Job queue.** Categorization runs in `Promise.all` today. Past ~50
-  concurrent posts a queue (BullMQ + Redis) is appropriate so the LLM
-  rate limits aren't a per-request concern.
-- **Semantic similarity for draft grounding.** Add pgvector to look up the
-  N most similar previously-resolved posts and pass them into the draft
-  prompt. The current draft is grounded only in the system prompt; a real
-  agent would learn from past resolutions.
-- **Prompt versioning.** The cache key is `(content_hash, model)`. Bumping
-  the model invalidates automatically. The system prompt currently has
-  no version, so changing it does not invalidate the cache. Encoding a
-  prompt version in the model field (`claude-haiku-4-5@v2`) is the cleanest
-  fix.
-- **Authentication.** The /api endpoints are unauthenticated. For a
-  production deployment, an API key or session-based auth in front of
-  Express is the next step.
+Place the wiring files (see `INTEGRATION.md`):
+- `server/rag/embed.js`, `server/rag/groundedDraft.js`
+- `server/db/repositories/rag.js`
+- `src/components/RagDraftPanel.jsx`
+
+Apply the two edits:
+- `server/app.js` — add `ragRepo` injection + the `/api/draft/grounded` route
+- `server/llm/` adapters — add the `draftGrounded({system,user})` method
+
+---
+
+## 4. Daily run
+
+Three things must be up: Postgres, Ollama, the app.
+
+```bash
+npm run db:up                      # if the container isn't already running
+ollama serve                       # in its own terminal, or launch the app
+npm run dev                        # server (3001) + client, via concurrently
+```
+
+Health check:
+```bash
+curl -s http://localhost:3001/api/health | jq
+```
+
+---
+
+## 5. Smoke tests
+
+**Endpoint:**
+```bash
+curl -s http://localhost:3001/api/draft/grounded \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Marriage","body":"I just got married, can I add my spouse now?"}' | jq
+```
+Expect a `draft` containing a verified `[policy:N]` citation. An off-topic body
+(e.g. "reset my password") should return `"abstained": true`.
+
+**Retrieval only** (from `rag/`):
+```bash
+cd rag && set -a; source .env; set +a
+npx tsx scripts/test-retrieve.ts "Can a part-time employee enroll?"
+```
+
+---
+
+## 6. Routine operations
+
+### Re-ingest after a policy doc changes
+```bash
+psql "$DATABASE_URL" -c "TRUNCATE policy_chunks RESTART IDENTITY;"
+cd rag && set -a; source .env; set +a && npm run ingest && cd ..
+```
+(Truncate avoids duplicate rows — ingest appends.)
+
+### Add resolved-ticket precedents
+Backfill from your approved drafts, or append to `rag/docs/resolved-tickets.json`
+and re-ingest. De-dupe first if re-running on the same file.
+
+### Switch draft provider
+Change `LLM_PROVIDER` (or `LLM_PROVIDER_DRAFT`) and restart the app. The grounded
+route honors it because it calls `providers.draft.draftGrounded`. No data change.
+
+### Switch embedding model
+Dimensions must match across model, `EMBED_DIM`, and the schema `vector(...)`.
+Update all three, then truncate and re-ingest:
+```bash
+psql "$DATABASE_URL" -c "TRUNCATE policy_chunks, resolved_tickets RESTART IDENTITY;"
+cd rag && npm run ingest && cd ..
+```
+
+---
+
+## 7. Monitoring
+
+`retrieval_log` is the operational source of truth.
+
+```sql
+-- abstention rate, last 24h
+SELECT count(*) AS total,
+       count(*) FILTER (WHERE abstained IS NOT NULL) AS abstained
+FROM retrieval_log WHERE created_at > now() - interval '24 hours';
+
+-- retrieval strength distribution, last 7d
+SELECT round(top_similarity::numeric,1) AS bucket, count(*)
+FROM retrieval_log WHERE created_at > now() - interval '7 days'
+GROUP BY bucket ORDER BY bucket;
+
+-- drafts that cited nothing despite retrieving policy (possible regression)
+SELECT count(*) FROM retrieval_log
+WHERE abstained IS NULL AND cited_policy_ids = '[]' AND retrieved_policy_ids <> '[]';
+```
+
+Alert on relative jumps, not absolute numbers.
+
+---
+
+## 8. Troubleshooting (failure modes seen during setup)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `socket "/tmp/.s.PGSQL.5432" ... No such file` | `$DATABASE_URL` empty in shell | `set -a; source .env; set +a`; `echo "$DATABASE_URL"` |
+| `role "triage" does not exist` / `connection refused` on 5432 | Hitting wrong Postgres; URL on 5432 not 5433 | Use `:5433`; confirm `docker port triage-postgres 5432` |
+| `no public port '5432' published` | Container recreated without port mapping | `docker compose up -d --force-recreate postgres` |
+| `extension "vector" is not available` | Stock `postgres` image lacks pgvector | Use `pgvector/pgvector:pg16` image |
+| Container stuck `Restarting`; logs mention data-dir/mount | `pg18` image data-directory layout change | Pin image to `pg16`; `down -v` + `up` (data already empty) |
+| `Container name "/triage-postgres" already in use` | Stopped container exists | `docker start triage-postgres` (not `compose up`) |
+| `Top-level await ... not supported with "cjs"` | rag/ is CommonJS; script used top-level await | Wrap logic in `async function main(){…}; main().catch(...)` |
+| `Cannot find module .../scripts/scripts/x.ts` | Ran from inside `scripts/` | Run from `rag/`, or drop the `scripts/` prefix |
+| `zsh: quote>` hangs | Pasted a `#` comment containing an apostrophe | Ctrl+C; don't paste trailing `# …` notes into zsh |
+| Every case abstains | Query/ingest embedding models differ, or threshold too high | Same model both sides; re-ingest; lower `MIN_SIMILARITY` |
+| Duplicate retrieval hits | Ingest ran twice (it appends) | `TRUNCATE … RESTART IDENTITY;` then re-ingest once |
+| Grounded route ignores `LLM_PROVIDER` | `draftGrounded` hardcoded a provider | Ensure it calls `providers.draft.draftGrounded`, not a direct fetch |
+| `Ollama embed failed ECONNREFUSED` | Ollama not running | `ollama serve`; `ollama pull nomic-embed-text` |
+
+---
+
+## 9. Rollback / disable
+
+The grounded route is additive. To disable without removing code:
+- Stop calling `/api/draft/grounded` from the UI (use the original `/api/draft`), or
+- Set `MIN_SIMILARITY=1.0` to force universal abstention while investigating, or
+- Comment out the route registration in `app.js`.
+
+The RAG tables are inert when not queried; leave them in place. Full teardown:
+`DROP TABLE policy_chunks, resolved_tickets, retrieval_log;` (keep the extension).
+
+---
+
+## 10. Recovery
+
+The database is reproducible: app schema from migrations + `db:seed`, RAG corpus
+from `rag/docs/` via ingest. A clean rebuild is `npm run db:reset` (app) followed
+by the §3.4–3.5 pgvector + RAG steps. Only `retrieval_log` is non-reproducible —
+include it in DB backups if its history matters.
+
+---
+
+## 11. Environment reference
+
+| Var | Default | Used by | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | — | app + rag | **port 5433**; same value both `.env` files |
+| `PORT` | 3001 | app | server port |
+| `LLM_PROVIDER` | — | app | `anthropic` / `ollama`; or `LLM_PROVIDER_TRIAGE` / `_DRAFT` |
+| `ANTHROPIC_API_KEY` | — | app | reuse your existing key |
+| `OLLAMA_URL` | `http://localhost:11434` | embed + ollama draft | |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | embed | must match what ingest used |
+| `POLICY_K` | 5 | retrieval | policy passages retrieved |
+| `PRECEDENT_K` | 3 | retrieval | precedents retrieved |
+| `MIN_SIMILARITY` | 0.45 | retrieval | cosine floor + abstention threshold |
+| `DRAFT_MODEL` | per adapter | draft | model the draft provider uses |
