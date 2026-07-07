@@ -49,6 +49,9 @@ export const policyChunks = pgTable(
     section: text("section"),
     chunkText: text("chunk_text").notNull(),
     sourceUrl: text("source_url"),
+    // Which plan(s) this chunk applies to. Null means it applies to any plan
+    // (e.g. general eligibility rules) rather than one specific plan type.
+    planType: text("plan_type"),
     embedding: vector("embedding", { dimensions: EMBED_DIM }).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },

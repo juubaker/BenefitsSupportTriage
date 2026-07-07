@@ -1,351 +1,214 @@
-# Benefits Support Triage Agent
+# Benefits Support Triage — MCP Server
 
-An Oracle HCM Cloud Benefits support triage tool. Categorizes incoming support
-posts against a fixed Benefits taxonomy and surfaces the resolved response, or
-generates an AI-drafted reply for open posts.
+Exposes the RAG-backed Benefits Support Triage Agent as a standard [MCP](https://modelcontextprotocol.io)
+server: any MCP-compatible host (Claude Desktop, Claude Code, Cursor) can search the
+policy corpus, find precedent tickets, run full triage, and pull live RAG eval
+scores — without touching the app's own UI.
 
-## Stack
-
-- **Client** — React 18, Vite 5, Tailwind CSS 3, Manrope + Fraunces + JetBrains Mono
-- **Server** — Node 20+, Express 4, swappable LLM provider abstraction
-- **AI** — Anthropic API (cloud) or Ollama (local) via a uniform `LLMProvider` interface
-- **Database** — PostgreSQL 16, [Drizzle ORM](https://orm.drizzle.team/) + drizzle-kit migrations, `node-postgres` pool
-- **Tests** — Vitest 2, Testing Library, happy-dom, supertest
-- **Models** — Haiku for fast classification, Sonnet for the drafted response (configurable)
-
-## Quick start
-
-```bash
-# 1. Install
-npm install
-
-# 2. Configure
-cp .env.example .env
-# then open .env and paste your Anthropic API key
-
-# 3. Boot Postgres + run migrations + seed
-npm run db:setup
-
-# 4. Run both client and server
-npm run dev
-```
-
-- Client: <http://localhost:5173>
-- API:    <http://localhost:3001/api/health>
-- Adminer (DB UI): <http://localhost:8080>  — System: PostgreSQL, Server: postgres, User/Pass/DB: triage
-
-If Postgres isn't running, the UI falls back to in-memory seed data and shows
-a "Demo mode" banner. Categorizations and drafts won't persist, but the UI
-still works for a quick demo.
+This exists to answer one interview question well: **"How do you know your RAG
+is any good?"** The answer isn't a claim — it's a live tool call to
+`get_eval_metrics`, backed by a DeepEval golden dataset, callable from inside
+Claude Desktop in front of an interviewer.
 
 ## Architecture
 
 ```
-┌─────────────┐  /api/posts        ┌──────────────┐
-│  React UI   │  /api/categorize   │  Express     │
-│  (Vite)     │  /api/draft        │  /api/health │
-└──────┬──────┘──────────────────► └──────┬───────┘
-       │                                  │
-       │                                  ├──► repositories (Drizzle) ──► PostgreSQL
-       │                                  │
-       │                                  └──► LLMProvider ──┬─► Anthropic (cloud)
-       │                                                     └─► Ollama   (local)
-       │
-       └─ Swappable via LLM_PROVIDER env var. Cache key is
-          (content_hash, provider:model) so swaps invalidate
-          stale entries automatically.
+                    ┌─────────────────────────┐
+                    │   MCP Host              │
+                    │ (Claude Desktop / Code)  │
+                    └────────────┬────────────┘
+                                 │ JSON-RPC / stdio
+                    ┌────────────▼────────────┐
+                    │  Benefits Triage         │
+                    │  MCP Server (this repo)  │
+                    ├──────────────────────────┤
+                    │ Tools:                   │
+                    │  search_policies         │
+                    │  find_similar_tickets    │
+                    │  triage_ticket           │
+                    │  get_eval_metrics        │
+                    │ Resources:               │
+                    │  policy://chunk/*        │
+                    │  ticket://*              │
+                    │  eval://latest           │
+                    └────────────┬────────────┘
+                                 │ Drizzle (shared client)
+                    ┌────────────▼────────────┐
+                    │  Postgres + pgvector     │
+                    │  policy_chunks           │
+                    │  resolved_tickets        │
+                    └──────────────────────────┘
+                                 ▲
+                    ┌────────────┴────────────┐
+                    │  Ollama (nomic-embed-text)│
+                    │  DeepEval sidecar (pytest) │
+                    │  Anthropic API (triage LLM)│
+                    └──────────────────────────┘
 ```
 
-**Cache flow on POST /api/categorize:**
+The MCP server is a thin interface layer. It shares the same Drizzle client
+and pgvector tables as the existing Express API — no duplicated retrieval or
+business logic, no drift between "the app" and "the MCP server."
 
-1. Hash `title + body` → `content_hash`
-2. SELECT from `categorizations` WHERE `content_hash + model` matches → cache hit, return immediately
-3. On miss: call Anthropic, validate against taxonomy, INSERT, return
+## What's implemented
 
-This means duplicate or near-duplicate questions don't hit Anthropic twice.
-The `categorizations` table doubles as the audit log.
+| Tool | Backs onto |
+|---|---|
+| `search_policies` | pgvector cosine search over `policy_chunks` |
+| `find_similar_tickets` | pgvector cosine search over `resolved_tickets` |
+| `triage_ticket` | full agent loop: retrieval + Claude reasoning + structured output |
+| `get_eval_metrics` | reads latest DeepEval sidecar JSON report |
 
-## LLM providers
+| Resource URI | Returns |
+|---|---|
+| `policy://chunk/{id}` | Raw text of a specific policy chunk |
+| `ticket://{id}` | Full resolved ticket record |
+| `ticket://{id}/resolution` | Just the resolution summary |
+| `eval://latest` | Latest DeepEval run, all four metrics |
 
-The route layer is provider-agnostic. The two routes can use the **same**
-provider (the common case) or **different** ones — Ollama for cheap local
-classification, Anthropic for higher-quality drafts. A registry resolves
-which adapter sits behind each route based on env vars; swapping is a
-config change, not a code change.
+One prompt (`triage_summary_for_manager`) is included to demonstrate all
+three MCP primitives, not just tools.
 
-Two adapters ship today:
-
-| Provider | Network | Cost | API key | Use case |
-|---|---|---|---|---|
-| `anthropic` | Cloud | Per-token | Required | Production quality |
-| `ollama` | Local | Free | None | Offline dev, demos, CI |
-
-### Configuration
-
-Resolution per route:
-
-```
-/api/categorize  →  LLM_PROVIDER_TRIAGE  →  LLM_PROVIDER  →  'anthropic'
-/api/draft       →  LLM_PROVIDER_DRAFT   →  LLM_PROVIDER  →  'anthropic'
-```
-
-Three common shapes:
+## Setup
 
 ```bash
-# 1. Everything on Anthropic (default)
-LLM_PROVIDER=anthropic
-
-# 2. Everything local — no API key needed, no network calls
-LLM_PROVIDER=ollama
-
-# 3. Mixed — cheap local classify, quality cloud draft
-LLM_PROVIDER_TRIAGE=ollama
-LLM_PROVIDER_DRAFT=anthropic
+git clone <this-repo>
+cd benefits-support-triage-mcp
+npm install
+cp .env.example .env   # set DATABASE_URL, OLLAMA_URL, EVAL_REPORT_PATH
+npm run build
 ```
 
-The active config for each route is reported by `GET /api/health` and
-logged on server startup, so you can confirm the swap took effect.
+Wire up the schema and business logic to your real implementation:
 
-### Switching to Ollama (local, free)
+1. `src/db.ts` — point at your existing `rag/db/client.ts` and `rag/db/schema.ts`
+2. `src/embeddings.ts` — point at your existing Ollama embed wrapper
+3. `src/triage.ts` — extract your existing Express route's agent-loop logic here
+4. `src/eval.ts` — point `EVAL_REPORT_PATH` at your DeepEval sidecar's output
+
+Everywhere a change is needed is marked `// SCHEMA:` or `SCHEMA` in the file
+header comments.
+
+## Running it
+
+**Standalone (for local dev):**
 
 ```bash
-# 1. Install Ollama
-brew install ollama          # macOS
-# or download from https://ollama.com/download
-
-# 2. Pull a model (one-time, ~5 GB)
-ollama pull qwen2.5:7b       # general-purpose, recommended
-# or  ollama pull llama3.2:3b   # smaller, faster on modest hardware
-
-# 3. Start the runtime (the macOS app does this automatically)
-ollama serve
-
-# 4. Configure the project
-echo "LLM_PROVIDER=ollama" >> .env
-
-# 5. Restart the app — no code changes
 npm run dev
 ```
 
-### How the cache stays correct across swaps
-
-The `categorizations` table stores `model` as `<provider>:<model>` —
-e.g. `anthropic:claude-haiku-4-5-20251001` or `ollama:qwen2.5:7b`. The
-cache lookup keys on this prefixed value, so swapping providers does
-not return cached results from a different one. Old entries remain in
-the table for audit; they're just bypassed.
-
-This also means **per-route swaps stay correct**: if `/api/categorize`
-moves from Ollama to Anthropic mid-session, the next request misses
-the old Ollama cache and produces a fresh Anthropic categorization.
-
-### Adding a new provider
-
-Three steps:
-
-1. Create `server/llm/myprovider.js` that exports `createMyProvider(env)`
-   returning `{ name, triageModel, draftModel, classify, draft }`.
-2. Register it in `server/llm/index.js`:
-   ```js
-   const FACTORIES = {
-     anthropic: createAnthropicProvider,
-     ollama: createOllamaProvider,
-     myprovider: createMyProvider,  // ← add here
-   };
-   ```
-3. Add adapter tests in `server/llm/myprovider.test.js`. Use the existing
-   `anthropic.test.js` and `ollama.test.js` as templates — both stub
-   `global.fetch`, so no real API calls are made.
-
-The route layer needs no changes.
-
-
-
-### Schema
-
-Three tables in `server/db/schema/index.js`:
-
-| Table | Purpose |
-|---|---|
-| `posts` | The support posts. Primary key is the human-friendly id (`CC-7821`). |
-| `categorizations` | Per-classification audit + cache. Indexed on `(content_hash, model)`. Cascade-deletes with the post. |
-| `drafts` | AI-generated drafts so they survive a refresh. Cascade-deletes with the post. |
-
-### Scripts
+**Inspect without an LLM in the loop (do this first, always):**
 
 ```bash
-npm run db:up         # docker compose up -d (Postgres + Adminer)
-npm run db:down       # docker compose down (preserves volume)
-npm run db:reset      # docker compose down -v && setup (NUKES the volume)
-
-npm run db:wait       # block until Postgres accepts connections
-npm run db:generate   # drizzle-kit generate (after editing the schema)
-npm run db:migrate    # apply pending migrations
-npm run db:push       # push schema directly without migration files (dev only)
-npm run db:studio     # drizzle-kit studio at https://local.drizzle.studio
-npm run db:seed       # populate the 10 seed support posts
-
-npm run db:setup      # up + wait + migrate + seed   (one-shot for new clones)
+npm run build
+npm run inspect
 ```
 
-### Hosting it for real
+Opens a web UI at the printed URL. List tools, call `search_policies` with a
+real query, confirm you get ranked results with similarity scores before
+wiring this into any host.
 
-The `DATABASE_URL` in `.env` is just a connection string — point it at
-**Neon**, **Supabase**, **RDS**, or anything else that speaks Postgres. No
-code changes needed. For free hosting suitable for portfolio demos:
+**Claude Desktop:**
 
-- [Neon](https://neon.tech) — serverless Postgres, free tier with 0.5 GB
-- [Supabase](https://supabase.com) — Postgres + auth + storage, free tier with 500 MB
-
-## Open in VS Code
-
-```bash
-code benefits-support-triage.code-workspace
-```
-
-Recommended extensions auto-prompt on open: Tailwind IntelliSense, ESLint,
-Error Lens, Prettier, Vitest Test Explorer, dotenv.
-
-`.vscode/launch.json` includes:
-
-- "Debug: Triage API server" — Express with debugger attached
-- "Debug: Vite client" — Chrome at `localhost:5173`
-- "Debug: Vitest — current file" / "Debug: Vitest — all tests"
-- "Debug: Full stack" compound — boots both server and client
-
-## Testing
-
-```bash
-npm test               # one-shot run
-npm run test:watch     # watch mode
-npm run test:ui        # browser-based runner at :51204
-npm run test:coverage  # text + HTML coverage into ./coverage
-npm run test:server    # only server/ tests
-npm run test:client    # only src/ tests
-```
-
-### Coverage
-
-| Layer | File | What it tests |
-|---|---|---|
-| Server | `server/app.test.js` | Endpoint contracts, validation, taxonomy enforcement (422), upstream errors, **cache hit/miss behavior**, persistence (recordCategorization called or not based on postId) |
-| Server (integration) | `server/db/repositories/integration.test.js` | Real Postgres round-trips: upsert, latest-cat join, cache lookup, cascade delete. **Skipped unless `TEST_DATABASE_URL` is set.** |
-| Repository (unit) | `server/db/repositories/categorizations.test.js` | `hashContent` determinism + boundary sensitivity |
-| Lib | `src/lib/categories.test.js` | Taxonomy shape, ID/label uniqueness, helper lookups |
-| Lib | `src/lib/api.test.js` | Fetch wrappers — `listPosts`, `categorizePost`, `draftResponse`, `getHealth` |
-| Data | `src/data/seedPosts.test.js` | Required fields, ID uniqueness, answered/open consistency |
-| UI primitives | `src/components/ui.test.jsx` | CategoryChip, ConfidenceBar, StatusDot, StatBlock, FilterRow |
-| Integration | `src/components/BenefitsSupportTriage.test.jsx` | Loading state, API fetch, fallback on API failure, filters, post selection, draft generation, batch categorization |
-
-The component test mocks `src/lib/api.js`. The server test injects mock
-repositories into `createApp()` so it never touches a real Postgres. The
-real-DB integration tests opt in via `TEST_DATABASE_URL`.
-
-### Running integration tests against a real DB
-
-```bash
-docker compose up -d postgres
-createdb -h localhost -U triage triage_test   # or via Adminer
-TEST_DATABASE_URL=postgresql://triage:triage@localhost:5433/triage_test \
-  npm run db:migrate
-TEST_DATABASE_URL=postgresql://triage:triage@localhost:5433/triage_test \
-  npx vitest run server/db/repositories/integration.test.js
-```
-
-## API surface
-
-### `GET /api/posts`
-
-Returns all posts joined with their latest categorization and draft.
+Add to `claude_desktop_config.json`:
 
 ```json
 {
-  "posts": [
-    {
-      "id": "CC-7821",
-      "title": "Birth life event not opening enrollment window",
-      "body": "...",
-      "status": "answered",
-      "category": "Life Events",
-      "confidence": 1.0,
-      "reasoning": "Pre-categorized seed data",
-      "draft": null,
-      ...
+  "mcpServers": {
+    "benefits-support-triage": {
+      "command": "node",
+      "args": ["/absolute/path/to/benefits-support-triage-mcp/dist/index.js"],
+      "env": {
+        "DATABASE_URL": "postgres://postgres:postgres@localhost:5433/benefits_triage",
+        "OLLAMA_URL": "http://localhost:11434"
+      }
     }
-  ]
+  }
 }
 ```
 
-### `POST /api/categorize`
+Restart Claude Desktop. The four tools appear under the hammer icon.
 
-```json
-// request
-{ "postId": "CC-7821", "title": "...", "body": "..." }
+**Claude Code:**
 
-// response (cache miss)
-{ "category": "Life Events", "confidence": 0.94, "reasoning": "...", "cached": false }
-
-// response (cache hit)
-{ "category": "Life Events", "confidence": 0.94, "reasoning": "...", "cached": true }
+```bash
+claude mcp add benefits-support-triage -- node /absolute/path/to/dist/index.js
 ```
 
-### `POST /api/draft`
+## Demo script (for interviews)
 
-```json
-// request
-{ "postId": "CC-7821", "title": "...", "body": "..." }
+Structured as a 5-minute walkthrough. Each step has a specific point to make
+— don't just click through it.
 
-// response
-{ "draft": "Most often this is the Life Event Reason missing from..." }
-```
+### 1. Open with the problem (30 sec)
 
-The category must be one of the labels in `src/lib/categories.js`. The
-server rejects any model output that falls outside the taxonomy with a 422
-**before** persisting it.
+"Most RAG demos show you an answer and ask you to trust it. I wanted a demo
+where the retrieval quality is checkable, live, by anyone — not just visible
+in my app's UI."
 
-## Plugging into an agent framework
+### 2. Show retrieval in isolation (1 min)
 
-The two POST routes are shaped so they can be lifted directly into an agent
-tool definition (Anthropic tool use, Oracle's AI agent framework, LangChain).
+In Claude Desktop:
 
-```ts
-tools: [
-  {
-    name: 'categorize_support_post',
-    description: 'Classify an Oracle HCM Benefits support post into one of 10 categories.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        postId: { type: 'string' },
-        title:  { type: 'string' },
-        body:   { type: 'string' },
-      },
-      required: ['title', 'body'],
-    },
-  },
-  {
-    name: 'draft_support_response',
-    description: 'Draft a senior-consultant reply to an Oracle HCM Benefits support post.',
-    input_schema: { /* same shape */ },
-  },
-]
-```
+> "Search the benefits policy corpus for HSA contribution limits for family
+> coverage."
 
-## Production notes
+Claude calls `search_policies`. Point out the response includes
+**similarity scores and chunk IDs**, not just text — the retrieval is
+auditable, not a black box.
 
-- The Anthropic key is server-side only. Never move `callClaude` to the client.
-- The cache key is `(content_hash, model)`. Bumping the model invalidates the
-  cache automatically — no need to manually flush when you upgrade.
-- For real volume, add a job queue (BullMQ) in front of the server routes so
-  batch categorizations don't block.
-- Add a TTL or invalidation policy on the cache if your taxonomy or system
-  prompt changes — easiest is to alter the `model` field to include a prompt
-  version (e.g. `claude-haiku-4-5-20251001@v2`).
-- The `posts.id` primary key is the human-friendly id. If you ingest from a
-  source that doesn't have stable IDs, switch to `cuid()` or `uuid` and
-  store the external id in a separate column.
+### 3. Show precedent search (1 min)
 
-## License
+> "Have we seen tickets like 'can I change my HSA contribution mid-year' before?"
 
-MIT — for portfolio and internal demo use. Do not auto-post AI drafts to a
-customer-facing forum without human review.
+Claude calls `find_similar_tickets`. This demonstrates the dual-corpus design
+— policy language and operational precedent are separate retrieval paths
+that a triage decision should draw on both.
+
+### 4. Run full triage (1 min)
+
+> "Triage this ticket: 'My spouse just lost their job and I need to change my
+> health plan mid-year, is that allowed?'"
+
+Claude calls `triage_ticket`. Show the output includes
+`retrieval_evidence` (which chunks/tickets it actually used) and
+`requires_human_review` — the system is honest about its own confidence
+rather than always sounding certain.
+
+### 5. The payoff — eval metrics on demand (1.5 min)
+
+> "How do you know this retrieval is actually good?"
+
+> "Show me the latest RAG eval metrics for this system."
+
+Claude calls `get_eval_metrics`, returning contextual precision/recall,
+faithfulness, and answer relevancy from your 15-case DeepEval golden dataset.
+This is the answer to the RAG-evaluation question that doesn't rely on you
+asserting it — it's a live, re-runnable number.
+
+### Close
+
+"The MCP server is what let me expose this outside my own UI — the tools are
+the same code path as the production API, so this isn't a separate demo
+system, it's the real thing wrapped in a standard interface."
+
+## Why this is a stronger artifact than a UI screenshot
+
+- **Portability**: works in any MCP host, not just your custom frontend
+- **Auditability**: every tool response carries retrieval provenance (IDs,
+  similarity scores) — nothing is asserted without evidence attached
+- **Honesty**: `requires_human_review` and eval metrics mean the system
+  reports its own limits instead of always sounding confident
+- **No duplicated logic**: same Drizzle client and triage pipeline as the
+  production Express API — this isn't a toy reimplementation
+
+## Roadmap (mention if asked "what's next")
+
+- Swap stdio for Streamable HTTP + OAuth 2.1 to make this a remote server
+  other teams could point their own MCP hosts at
+- Add a `flag_policy_gap` tool that lets the triage output feed back into a
+  queue for policy-writing review when `requires_human_review` fires often
+  for the same category
+- Wrap NexusAgent as an MCP *host* so its policy engine and audit logging
+  govern calls into this server (and other third-party MCP servers) —
+  the enterprise-governance story

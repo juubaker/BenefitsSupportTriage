@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "benefits-support-triage": {
+      "command": "node",
+      "args": ["/Users/johnbaker/Projects/support/benefits-support-triage-mcp/dist/index.js"],
+      "env": {
+        "DATABASE_URL": "postgres://triage:triage@localhost:5433/triage",
+        "OLLAMA_URL": "http://localhost:11434"
+      }
+    }
+  }
+}

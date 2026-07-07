@@ -1,6 +1,20 @@
 export interface Chunk {
   text: string;
   section?: string;
+  planType?: string;
+}
+
+// Sections that apply to one specific plan type rather than to plans in
+// general. Matched against the chunk's `section` heading, not free-text
+// keyword sniffing — the same word (e.g. "dental") can appear inside a
+// general-eligibility sentence without making that chunk dental-specific.
+const SECTION_PLAN_TYPE: Record<string, string> = {
+  "eligibility and limits": "HDHP", // HSA section — HDHP-only by policy
+};
+
+export function inferPlanType(section: string | undefined): string | undefined {
+  if (!section) return undefined;
+  return SECTION_PLAN_TYPE[section.trim().toLowerCase()];
 }
 
 /**
@@ -33,7 +47,7 @@ export function chunkText(
 
   const flush = () => {
     const text = buf.trim();
-    if (text) chunks.push({ text, section: currentSection });
+    if (text) chunks.push({ text, section: currentSection, planType: inferPlanType(currentSection) });
     // carry overlap from the tail of the last chunk
     buf = overlapChars > 0 ? text.slice(-overlapChars) : "";
   };
@@ -53,7 +67,8 @@ export function chunkText(
     }
     buf = buf ? `${buf}\n\n${block}` : block;
   }
-  if (buf.trim()) chunks.push({ text: buf.trim(), section: currentSection });
+  if (buf.trim())
+    chunks.push({ text: buf.trim(), section: currentSection, planType: inferPlanType(currentSection) });
 
   return chunks;
 }

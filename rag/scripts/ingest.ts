@@ -14,6 +14,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, extname, basename } from "node:path";
+import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { policyChunks, resolvedTickets } from "../db/schema";
 import { chunkText } from "../lib/chunk";
@@ -37,6 +38,10 @@ async function ingestPolicies() {
     const docTitle = basename(file, extname(file));
     const chunks = chunkText(raw);
 
+    // The source file is the single source of truth for this doc's chunks —
+    // replace rather than append, so re-running ingest doesn't duplicate rows.
+    await db.delete(policyChunks).where(eq(policyChunks.docTitle, docTitle));
+
     for (const c of chunks) {
       const embedding = await embed(c.text);
       await db.insert(policyChunks).values({
@@ -44,6 +49,7 @@ async function ingestPolicies() {
         section: c.section ?? null,
         chunkText: c.text,
         sourceUrl: null, // set if you host the policy docs somewhere
+        planType: c.planType ?? null,
         embedding,
       });
       total++;
@@ -64,6 +70,10 @@ async function ingestTickets() {
     category: string;
     approvedResponse: string;
   }[];
+
+  // resolved-tickets.json is the single source of truth here — replace
+  // rather than append, so re-running ingest doesn't duplicate rows.
+  await db.delete(resolvedTickets);
 
   for (const r of rows) {
     const embedding = await embed(r.caseText); // embed the QUESTION, not the answer

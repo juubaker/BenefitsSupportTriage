@@ -1,0 +1,1 @@
+ALTER TABLE "policy_chunks" ADD COLUMN "plan_type" text;
