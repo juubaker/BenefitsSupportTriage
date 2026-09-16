@@ -1,0 +1,4 @@
+# Verified against deepeval 4.0.7 (July 2026)
+deepeval>=4.0.7,<5
+requests>=2.31
+anthropic>=0.40
