@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mcp-inspector",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=postgresql://triage:triage@localhost:5433/triage",
+        "OLLAMA_URL=http://localhost:11434",
+        "npx",
+        "@modelcontextprotocol/inspector",
+        "node",
+        "dist/index.js"
+      ],
+      "port": 6274
+    }
+  ]
+}
