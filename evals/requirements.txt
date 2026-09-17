@@ -1,4 +1,12 @@
+# v1 — answer-quality eval (judge.py, test_rag_metrics.py)
 # Verified against deepeval 4.0.7 (July 2026)
 deepeval>=4.0.7,<5
-requests>=2.31
 anthropic>=0.40
+
+# v2 — trajectory eval (cases.py, metrics.py, trajectory_judge.py, run.py)
+pyyaml>=6.0
+pytest>=8.0
+psycopg[binary]>=3.2
+
+# shared (higher pin wins)
+requests>=2.32

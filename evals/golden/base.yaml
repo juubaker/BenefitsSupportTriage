@@ -1,0 +1,109 @@
+# 15 base cases — the v1 originals, ported with trajectory expectations.
+cases:
+  - id: base-01
+    bucket: base
+    subject: "Change PCP on HMO"
+    body: "How do I change my primary care physician on the HMO plan?"
+    outcome: { category: "plan_administration", priority: "low", grounding_ids: ["chunk-pcp-01"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+    reasoning_rubric: "States the self-service portal path and that PCP changes are effective the following month."
+
+  - id: base-02
+    bucket: base
+    subject: "FSA rollover amount"
+    body: "How much of my health FSA can I roll over to next year?"
+    outcome: { category: "spending_accounts", priority: "low", grounding_ids: ["chunk-fsa-07"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+    reasoning_rubric: "Cites the current IRS carryover limit from policy, not a memorized figure."
+
+  - id: base-03
+    bucket: base
+    subject: "Dental annual maximum"
+    body: "What's the annual maximum benefit on the dental PPO?"
+    outcome: { category: "dental", priority: "low", grounding_ids: ["chunk-dental-03"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-04
+    bucket: base
+    subject: "Add newborn to plan"
+    body: "My baby was born last week. How do I add them to my health plan?"
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 5, min_retrieval_calls: 1 }
+    reasoning_rubric: "Identifies birth as a QLE with a special enrollment window and names the proof required."
+
+  - id: base-05
+    bucket: base
+    subject: "Vision exam frequency"
+    body: "How often does vision cover a routine eye exam?"
+    outcome: { category: "vision", priority: "low", grounding_ids: ["chunk-vision-02"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-06
+    bucket: base
+    subject: "401k match formula"
+    body: "What's the company 401k match?"
+    outcome: { category: "retirement", priority: "low", grounding_ids: ["chunk-401k-05"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-07
+    bucket: base
+    subject: "HSA vs FSA difference"
+    body: "What's the difference between the HSA and the health FSA?"
+    outcome: { category: "spending_accounts", priority: "low", grounding_ids: ["chunk-hsa-22", "chunk-fsa-07"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 5, min_retrieval_calls: 1 }
+
+  - id: base-08
+    bucket: base
+    subject: "Short-term disability waiting period"
+    body: "Is there a waiting period before short-term disability pays out?"
+    outcome: { category: "disability", priority: "medium", grounding_ids: ["chunk-std-04"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-09
+    bucket: base
+    subject: "Open enrollment dates"
+    body: "When is open enrollment this year?"
+    outcome: { category: "enrollment", priority: "medium", grounding_ids: ["chunk-oe-01"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-10
+    bucket: base
+    subject: "Prescription tier for generic"
+    body: "What copay tier are generic drugs in?"
+    outcome: { category: "pharmacy", priority: "low", grounding_ids: ["chunk-rx-03"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-11
+    bucket: base
+    subject: "Life insurance default coverage"
+    body: "How much basic life insurance do I get by default?"
+    outcome: { category: "life_insurance", priority: "low", grounding_ids: ["chunk-life-02"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-12
+    bucket: base
+    subject: "Commuter benefit monthly limit"
+    body: "What's the monthly pre-tax commuter benefit limit?"
+    outcome: { category: "commuter", priority: "low", grounding_ids: ["chunk-commuter-01"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-13
+    bucket: base
+    subject: "Out-of-network coverage"
+    body: "Does the PPO cover out-of-network providers at all?"
+    outcome: { category: "medical", priority: "medium", grounding_ids: ["chunk-ppo-06"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-14
+    bucket: base
+    subject: "EAP sessions count"
+    body: "How many free EAP counseling sessions do I get?"
+    outcome: { category: "wellbeing", priority: "low", grounding_ids: ["chunk-eap-01"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
+
+  - id: base-15
+    bucket: base
+    subject: "Dependent age limit"
+    body: "Up to what age can I keep my child on my health plan?"
+    outcome: { category: "eligibility", priority: "low", grounding_ids: ["chunk-dep-02"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }

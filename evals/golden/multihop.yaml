@@ -1,0 +1,74 @@
+# 10 multi-hop cases — require >=2 retrieval calls; where GraphRAG's value would show.
+cases:
+  - id: multihop-01
+    bucket: multihop
+    subject: "Spouse job loss — add to plan or COBRA?"
+    body: "My wife was laid off and loses coverage end of month. Can I add her mid-year, and how does that compare to her taking COBRA?"
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-cobra-04"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+    reasoning_rubric: "Addresses BOTH the QLE special-enrollment path and the COBRA comparison, citing evidence for each."
+
+  - id: multihop-02
+    bucket: multihop
+    subject: "Moving states — plan and HSA impact"
+    body: "I'm relocating to another state next month. Does my HMO still work there, and does the move change my HSA eligibility?"
+    outcome: { category: "eligibility", priority: "medium", grounding_ids: ["chunk-hmo-network-02", "chunk-hsa-22"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+    reasoning_rubric: "Separately resolves network coverage in the new state and HSA eligibility effects."
+
+  - id: multihop-03
+    bucket: multihop
+    subject: "Divorce — remove spouse and change FSA"
+    body: "My divorce finalizes this month. I need to drop my ex from coverage and I want to reduce my FSA election — can I?"
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-fsa-07"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+    reasoning_rubric: "Treats divorce as a QLE permitting both the dependent removal and the FSA change."
+
+  - id: multihop-04
+    bucket: multihop
+    subject: "New hire — enrollment window and 401k start"
+    body: "I just started. When must I enroll in health benefits, and when am I eligible for the 401k match?"
+    outcome: { category: "enrollment", priority: "medium", grounding_ids: ["chunk-newhire-01", "chunk-401k-05"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+
+  - id: multihop-05
+    bucket: multihop
+    subject: "Pregnancy — coverage and STD leave"
+    body: "I'm pregnant. What prenatal coverage do I have and how does short-term disability apply to maternity leave?"
+    outcome: { category: "medical", priority: "medium", grounding_ids: ["chunk-maternity-02", "chunk-std-04"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+
+  - id: multihop-06
+    bucket: multihop
+    subject: "Turning 26 — options after aging off parent plan"
+    body: "I'm about to turn 26 and age off my parent's plan. What are my enrollment options here and the deadline?"
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-dep-02", "chunk-qle-12"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+
+  - id: multihop-07
+    bucket: multihop
+    subject: "Second job — dual coverage and HSA limits"
+    body: "I'm taking a second job with its own health plan. Can I be on both, and how does that affect my HSA contribution limit?"
+    outcome: { category: "eligibility", priority: "medium", grounding_ids: ["chunk-coord-01", "chunk-hsa-22"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+
+  - id: multihop-08
+    bucket: multihop
+    subject: "Adoption — add child and leave"
+    body: "We're adopting. How do I add the child to coverage and what parental leave applies?"
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-leave-03"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+
+  - id: multihop-09
+    bucket: multihop
+    subject: "Switching HMO to PPO mid-year after move"
+    body: "After my move, can I switch from the HMO to the PPO outside open enrollment, and what's the premium difference?"
+    outcome: { category: "enrollment", priority: "medium", grounding_ids: ["chunk-qle-12", "chunk-ppo-06"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
+
+  - id: multihop-10
+    bucket: multihop
+    subject: "Returning from leave — reinstate benefits and FSA"
+    body: "I'm back from unpaid leave. How do my benefits reinstate and what happens to my paused FSA contributions?"
+    outcome: { category: "plan_administration", priority: "medium", grounding_ids: ["chunk-leave-03", "chunk-fsa-07"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }

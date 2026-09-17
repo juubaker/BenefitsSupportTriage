@@ -1,0 +1,30 @@
+# Local observability stack (spec §7): OTel collector -> Jaeger (traces) + Prometheus (metrics).
+#   docker compose -f observability/docker-compose.observability.yml up -d
+# App env: OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+# Jaeger UI: http://localhost:16686   Prometheus UI: http://localhost:9090
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP (the app exports here)
+      - "8889:8889"   # Prometheus scrape endpoint (span metrics)
+    depends_on: [jaeger]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # UI
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"

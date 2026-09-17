@@ -1,0 +1,20 @@
+# Phase 4 graph cases — SKIPPED unless GRAPH_ENABLED=true (see eval/cases.py note).
+# These deliberately reward choosing traverse_policy_graph over repeated searches
+# on deep-chain questions, so the tool-choice + step-efficiency metrics quantify
+# whether the graph layer earns its place. Not in SMOKE_IDS; nightly only.
+cases:
+  - id: graph-01
+    bucket: multihop
+    subject: "What does getting married let me change, and what proof?"
+    body: "I just got married. Walk me through everything this lets me change on my benefits and exactly what documentation each change needs."
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-docs-31"] }
+    trajectory: { required_tools: ["triage_ticket"], max_steps: 5, min_retrieval_calls: 1, token_ceiling: 30000 }
+    reasoning_rubric: "Chains marriage -> QLE -> unlocked changes -> required proof, grounded in cited chunks; efficient traversal beats scattershot searching."
+
+  - id: graph-02
+    bucket: multihop
+    subject: "Chain from job loss to every downstream option"
+    body: "My partner lost their job. Trace every benefits option that opens up for us as a result and any that are mutually exclusive."
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-cobra-04"] }
+    trajectory: { required_tools: ["triage_ticket"], max_steps: 6, min_retrieval_calls: 1, token_ceiling: 35000 }
+    reasoning_rubric: "Surfaces the triggers/unlocks/excludes chain (QLE -> special enrollment vs COBRA, mutual exclusivity) with grounded citations."

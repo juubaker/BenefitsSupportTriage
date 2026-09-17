@@ -1,0 +1,39 @@
+# 5 out-of-scope cases — must escalate_to_human; no benefits-policy answer exists.
+cases:
+  - id: oos-01
+    bucket: out_of_scope
+    subject: "Payroll direct deposit"
+    body: "My paycheck went to the wrong bank account. Can you fix my direct deposit?"
+    outcome: { must_escalate: true }
+    trajectory: { required_tools: ["escalate_to_human"], forbidden_tools: [], max_steps: 3, token_ceiling: 15000 }
+    reasoning_rubric: "Identifies payroll as outside benefits triage scope and escalates."
+
+  - id: oos-02
+    bucket: out_of_scope
+    subject: "Password reset"
+    body: "I can't log into the HR portal, reset my password."
+    outcome: { must_escalate: true }
+    trajectory: { required_tools: ["escalate_to_human"], max_steps: 3, token_ceiling: 15000 }
+    reasoning_rubric: "Routes an IT/access issue to a human; does not attempt a benefits triage."
+
+  - id: oos-03
+    bucket: out_of_scope
+    subject: "PTO balance"
+    body: "How many vacation days do I have left this year?"
+    outcome: { must_escalate: true }
+    trajectory: { required_tools: ["escalate_to_human"], max_steps: 3, token_ceiling: 15000 }
+    reasoning_rubric: "Recognizes PTO is not a benefits-policy question in this corpus and escalates."
+
+  - id: oos-04
+    bucket: out_of_scope
+    subject: "Performance review"
+    body: "When is my next performance review and who is my reviewer?"
+    outcome: { must_escalate: true }
+    trajectory: { required_tools: ["escalate_to_human"], max_steps: 3, token_ceiling: 15000 }
+
+  - id: oos-05
+    bucket: out_of_scope
+    subject: "Office parking"
+    body: "How do I get a parking permit for the garage?"
+    outcome: { must_escalate: true }
+    trajectory: { required_tools: ["escalate_to_human"], max_steps: 3, token_ceiling: 15000 }

@@ -1,0 +1,76 @@
+# 5 budget-pressure cases — long bodies that force compaction; answer must stay grounded.
+cases:
+  - id: budget-01
+    bucket: budget
+    subject: "Long QLE narrative"
+    body: >
+      I want to walk you through my whole situation in detail so you have context. Back in January
+      I started a new role and enrolled in the HMO during my new-hire window. Then in March my
+      partner and I got married, which I know is a life event, but I did not make any changes at the
+      time because we were traveling for work and it slipped through the cracks. Now it is later in
+      the year, my partner has just lost their employer coverage because their company did layoffs,
+      and separately my elderly parent has moved in with us though I do not think that affects
+      benefits. The core question buried in all of this: given the marriage earlier and now my
+      partner's involuntary loss of coverage, can I add my partner to my plan right now, what is
+      the deadline, and what proof do I need to submit? Please be specific about the window.
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-docs-31"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 1, token_ceiling: 40000 }
+    reasoning_rubric: "Extracts the actual QLE (partner's loss of coverage) from the noise and gives the correct window and proof."
+
+  - id: budget-02
+    bucket: budget
+    subject: "Multi-topic long message"
+    body: >
+      Sorry for the wall of text. I have several things on my mind about benefits and figured I
+      would put them all in one message rather than send five. First, I have been contributing to
+      the HSA all year but I am not sure I am still HDHP-eligible after switching plans mid-year, so
+      I am worried about over-contributing. Second, my dental work is expensive this year and I want
+      to understand the annual maximum before I schedule more. Third, and this is the urgent one, my
+      spouse just lost their job and their coverage ends in two weeks, so I need to know if and how I
+      can add them to my plan and by when. Fourth, unrelated, I keep meaning to update my 401k
+      contribution but that is not urgent. If you can only address one thing, address the spouse
+      coverage question because it is time-sensitive.
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 1, token_ceiling: 40000 }
+    reasoning_rubric: "Prioritizes the time-sensitive spouse-coverage QLE the user flagged as urgent."
+
+  - id: budget-03
+    bucket: budget
+    subject: "Long pharmacy question"
+    body: >
+      I take several medications and want to understand my pharmacy costs in full before open
+      enrollment so I can pick the right plan. I am on a generic maintenance drug, a brand-name drug
+      that has no generic equivalent, and a specialty injectable. I have read the summary but it is
+      confusing. Can you tell me which copay tiers these fall into and whether the specialty drug
+      needs prior authorization? I also want to know if there is a mail-order option that is cheaper
+      for the maintenance drug since I take it every day and refilling monthly at the pharmacy is a
+      hassle and possibly more expensive over the year.
+    outcome: { category: "pharmacy", priority: "medium", grounding_ids: ["chunk-rx-03"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 1, token_ceiling: 40000 }
+
+  - id: budget-04
+    bucket: budget
+    subject: "Long disability scenario"
+    body: >
+      I have an upcoming surgery and I am trying to plan my finances around the recovery period. My
+      surgeon says I will be out of work for roughly eight weeks. I want to understand exactly how
+      short-term disability works: is there a waiting or elimination period before payments begin,
+      what percentage of my salary does it replace, how long can it last, and do I need to use my
+      PTO first before STD kicks in? I would also like to know how to file the claim and how far in
+      advance I should do it given the surgery is scheduled six weeks out.
+    outcome: { category: "disability", priority: "medium", grounding_ids: ["chunk-std-04"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 1, token_ceiling: 40000 }
+
+  - id: budget-05
+    bucket: budget
+    subject: "Long enrollment-options message"
+    body: >
+      I am trying to make sense of all my options during open enrollment and I want to be thorough.
+      I currently have the HMO but I am considering the PPO because I travel and see out-of-network
+      providers occasionally. I also want to start an HSA but I understand that is only available
+      with a high-deductible plan, so I need to know which of the offered plans are HSA-eligible.
+      On top of that I want to add vision this year and possibly increase my life insurance beyond
+      the default. Can you help me understand the plan choices, which support an HSA, and what the
+      enrollment deadline is so I do not miss it?
+    outcome: { category: "enrollment", priority: "medium", grounding_ids: ["chunk-oe-01", "chunk-hsa-22"] }
+    trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 1, token_ceiling: 40000 }

@@ -20,3 +20,6 @@ eval*/wiring.py
 
 # Build output
 dist/
+
+agent/node_modules/
+agent/dist/
