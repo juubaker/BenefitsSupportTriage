@@ -1,0 +1,81 @@
+{
+  "description": "Golden dataset for Benefits Support Triage Agent RAG evaluation. Each expected_output is the ground-truth answer the agent SHOULD give based on the policy_chunks corpus. Align these with your actual policy documents before treating scores as authoritative.",
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "enroll-001",
+      "input": "When is open enrollment and what happens if I miss it?",
+      "expected_output": "Open enrollment runs annually (typically a 2-3 week window in the fall). If you miss it, you cannot change your elections until the next open enrollment period unless you experience a qualifying life event such as marriage, divorce, birth or adoption of a child, or loss of other coverage."
+    },
+    {
+      "id": "qle-001",
+      "input": "I just got married. How long do I have to add my spouse to my health plan?",
+      "expected_output": "Marriage is a qualifying life event. You have 30 days from the date of marriage to add your spouse to your health plan. You will need to provide documentation such as a marriage certificate. Coverage is typically effective as of the event date or the first of the following month."
+    },
+    {
+      "id": "qle-002",
+      "input": "We just had a baby. What do I need to do to get her covered?",
+      "expected_output": "The birth of a child is a qualifying life event. You have 30 days from the date of birth to enroll your newborn. Submit an enrollment change with the birth certificate or hospital documentation. Coverage for a newborn is retroactive to the date of birth."
+    },
+    {
+      "id": "hsa-001",
+      "input": "What's the difference between an HSA and an FSA?",
+      "expected_output": "An HSA (Health Savings Account) is only available with a high-deductible health plan, funds roll over year to year, the account is portable if you leave the company, and it has higher annual contribution limits. An FSA (Flexible Spending Account) is available with any plan, is generally use-it-or-lose-it within the plan year (with a limited carryover or grace period), and is owned by the employer, not the employee."
+    },
+    {
+      "id": "hsa-002",
+      "input": "Can I contribute to an HSA if I'm enrolled in the PPO plan?",
+      "expected_output": "No. HSA contributions are only permitted if you are enrolled in a qualified high-deductible health plan (HDHP). The PPO plan is not HSA-eligible. If you want to set aside pre-tax money for medical expenses on the PPO plan, you can use a healthcare FSA instead."
+    },
+    {
+      "id": "cobra-001",
+      "input": "If I leave the company, how long can I keep my health insurance through COBRA?",
+      "expected_output": "Under COBRA, you can continue your group health coverage for up to 18 months after leaving the company (voluntary or involuntary termination, other than gross misconduct). Certain events, such as disability, can extend this to 29 months, and dependents may qualify for up to 36 months in some circumstances. You pay the full premium plus a 2% administrative fee."
+    },
+    {
+      "id": "dep-001",
+      "input": "How old can my kids be and still stay on my health insurance?",
+      "expected_output": "Dependent children can remain on your health plan until age 26, regardless of student status, marital status, or whether they live with you. Coverage typically ends at the end of the month in which they turn 26. Disabled dependents may remain covered beyond 26 with documentation."
+    },
+    {
+      "id": "401k-001",
+      "input": "How does the 401(k) company match work and when am I vested?",
+      "expected_output": "The company matches a percentage of your 401(k) contributions up to a stated limit (for example, 100% of the first 3% and 50% of the next 2% of eligible pay). Your own contributions are always 100% vested immediately. Employer matching contributions vest according to the plan's vesting schedule, such as a graded schedule over several years of service."
+    },
+    {
+      "id": "le-001",
+      "input": "Do my benefits continue while I'm on an approved leave of absence?",
+      "expected_output": "During an approved leave of absence, your health benefits generally continue as long as you pay your share of premiums. On paid leave, premiums continue via payroll deduction. On unpaid leave (including FMLA), you must arrange to pay your portion directly, and failure to pay may result in loss of coverage until you return."
+    },
+    {
+      "id": "prem-001",
+      "input": "Why did my medical premium go up this paycheck?",
+      "expected_output": "Premium changes on a paycheck are usually caused by one of the following: the new plan year rates taking effect after open enrollment, a change in your elected tier (for example adding a dependent), a change in your smoker/tobacco status or wellness surcharge, or a correction to a prior payroll error. Check your current elections in the enrollment system and compare your tier and plan against the new rate sheet."
+    },
+    {
+      "id": "ben-001",
+      "input": "How do I update my life insurance beneficiary after my divorce?",
+      "expected_output": "You can update your life insurance beneficiary at any time; a qualifying life event is not required. Log in to the benefits enrollment system, navigate to your life insurance elections, and edit the beneficiary designation. After a divorce, review all beneficiary designations (life insurance, 401(k), HSA) because prior designations may remain legally in force until changed."
+    },
+    {
+      "id": "dual-001",
+      "input": "My spouse and I both have coverage through our employers. Can we each cover the other, and how does coordination of benefits work?",
+      "expected_output": "Yes, you can be covered under both plans. Coordination of benefits determines which plan pays first: your own employer's plan is primary for you, and your spouse's plan is secondary. For dependent children, the birthday rule typically applies — the plan of the parent whose birthday falls earlier in the calendar year is primary. Being double-covered does not mean both plans pay in full; the secondary plan may cover some of what the primary plan did not."
+    },
+    {
+      "id": "vis-001",
+      "input": "Does the vision plan cover LASIK?",
+      "expected_output": "The vision plan does not cover LASIK as a standard benefit, but it typically offers a discount on laser vision correction through the plan's provider network. Standard covered services are the annual eye exam and an allowance toward frames, lenses, or contact lenses."
+    },
+    {
+      "id": "mid-001",
+      "input": "Can I switch from the HDHP to the PPO in the middle of the year because my medical costs are higher than I expected?",
+      "expected_output": "No. Higher-than-expected medical costs are not a qualifying life event, so you cannot change medical plans mid-year for that reason. Plan changes are only allowed during open enrollment or within 30 days of a qualifying life event such as marriage, divorce, birth or adoption, or loss of other coverage."
+    },
+    {
+      "id": "fsa-001",
+      "input": "What happens to the money in my FSA if I don't spend it by the end of the year?",
+      "expected_output": "Healthcare FSA funds are use-it-or-lose-it, subject to the plan's carryover or grace period provision. If the plan offers a carryover, a limited amount can roll into the next plan year; if it offers a grace period, you have roughly 2.5 extra months to incur expenses. Any remaining balance beyond those provisions is forfeited. Check which provision your plan uses and the claim submission deadline."
+    }
+  ]
+}
