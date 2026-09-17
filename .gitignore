@@ -13,3 +13,10 @@ eval*/wiring.py
 
 # Directory-listing junk (all index.html here are generated listings)
 **/index.html
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Build output
+dist/
