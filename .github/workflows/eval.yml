@@ -98,3 +98,10 @@ jobs:
       # - name: eval nightly (full 40 + judge)
       #   working-directory: evals
       #   run: cp wiring.example.py wiring.py && python -m run --suite nightly --min-pass-rate 0.85 --out scorecards/nightly.json
+    on:
+      workflow_dispatch:      # adds a manual "Run workflow" button
+      pull_request:
+      push:
+        tags: ["v*"]
+      schedule:
+        - cron: "0 7 * * *"
