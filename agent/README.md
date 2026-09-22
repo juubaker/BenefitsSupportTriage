@@ -59,3 +59,29 @@ follows. Keep this when adding files.
 
 The Python eval harness is NOT inside this package — it lives at the repo-level
 `evals/` folder alongside your existing files. See `evals/V2_CONSOLIDATION.md`.
+
+## Wiring the real services (Postgres + pgvector)
+
+`src/tools.ts` declares the `TriageServices` port; `src/services/` implements it
+against the live corpora. Apply `src/db/migrations/0001_triage_results.sql`
+first, then build the registry per run so the terminal tools know which ticket
+they are finishing:
+
+```ts
+import { buildTriageServices } from "./src/services/index.js";
+import { buildRegistry, SYSTEM_PROMPT } from "./src/tools.js";
+import { AgentHarness } from "./src/harness.js";
+
+const { services, close } = buildTriageServices();
+
+// per request:
+const registry = buildRegistry(services.forTicket({ ticketId, runId }));
+const harness = new AgentHarness({ registry, /* providers, store, tracing, ... */ });
+```
+
+Env: `DATABASE_URL`, `OLLAMA_URL`, `OLLAMA_EMBED_MODEL` (must match the model
+used at ingest — 768-dim `nomic-embed-text`), `RETRIEVAL_MIN_SIM`.
+
+Citations use `policy_chunks.chunk_key` when present and fall back to
+`chunk-<id>`. The eval goldens cite slugs such as `chunk-qle-12`, so ingest
+should populate `chunk_key` for grounding checks to match.

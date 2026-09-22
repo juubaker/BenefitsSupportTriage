@@ -12,7 +12,9 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.js'],
     css: false,
     include: ['**/*.{test,spec}.{js,jsx}'],
-    exclude: ['node_modules', 'dist', '.idea', '.git', '.cache'],
+    // agent/ and rag/ are separate packages with their own runners; never
+    // descend into them (or any nested node_modules) from the root suite.
+    exclude: ['**/node_modules/**', '**/dist/**', '.idea', '.git', '.cache', 'agent/**', 'rag/**', 'evals/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
