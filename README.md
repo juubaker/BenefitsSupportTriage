@@ -1,125 +1,118 @@
-# Benefits Support Triage — MCP Server
+# Benefits Support Triage
 
-Exposes the RAG-backed Benefits Support Triage Agent as a standard [MCP](https://modelcontextprotocol.io)
-server: any MCP-compatible host (Claude Desktop, Claude Code, Cursor) can search the
-policy corpus, find precedent tickets, run full triage, and pull live RAG eval
-scores — without touching the app's own UI.
+An AI triage system for Oracle HCM Cloud Benefits support posts. It classifies
+each post into a fixed Benefits taxonomy, retrieves the policy language and
+previously resolved tickets that bear on it, and either surfaces an existing
+answer or drafts a grounded, cited reply for a human reviewer. When the
+evidence is weak or the question needs account data it can't see, it
+escalates instead of guessing.
 
-This exists to answer one interview question well: **"How do you know your RAG
-is any good?"** The answer isn't a claim — it's a live tool call to
-`get_eval_metrics`, backed by a DeepEval golden dataset, callable from inside
-Claude Desktop in front of an interviewer.
+It is reachable through a three-pane reviewer UI backed by an Express API, and
+through an [MCP](https://modelcontextprotocol.io) server that exposes retrieval
+and triage to any MCP host (Claude Desktop, Claude Code, Cursor). A v2 agent,
+built as a bounded tool-use loop with token budgeting and tracing, is being
+brought in underneath both.
 
 ## Architecture
 
 ```
-                    ┌─────────────────────────┐
-                    │   MCP Host              │
-                    │ (Claude Desktop / Code)  │
-                    └────────────┬────────────┘
-                                 │ JSON-RPC / stdio
-                    ┌────────────▼────────────┐
-                    │  Benefits Triage         │
-                    │  MCP Server (this repo)  │
-                    ├──────────────────────────┤
-                    │ Tools:                   │
-                    │  search_policies         │
-                    │  find_similar_tickets    │
-                    │  triage_ticket           │
-                    │  get_eval_metrics        │
-                    │ Resources:               │
-                    │  policy://chunk/*        │
-                    │  ticket://*              │
-                    │  eval://latest           │
-                    └────────────┬────────────┘
-                                 │ Drizzle (shared client)
-                    ┌────────────▼────────────┐
-                    │  Postgres + pgvector     │
-                    │  policy_chunks           │
-                    │  resolved_tickets        │
-                    └──────────────────────────┘
-                                 ▲
-                    ┌────────────┴────────────┐
-                    │  Ollama (nomic-embed-text)│
-                    │  DeepEval sidecar (pytest) │
-                    │  Anthropic API (triage LLM)│
-                    └──────────────────────────┘
+  React reviewer UI (src/)             MCP host (Claude Desktop / Code)
+        │ HTTP                                  │ JSON-RPC over stdio
+        ▼                                       ▼
+  Express API (server/)                  MCP server (src/index.ts)
+  v1 pipeline: classify, grounded        search, precedent search,
+  draft, citation check, abstention      single-pass triage
+        │                                       │
+        └──────────────────┬────────────────────┘
+                           ▼
+          Postgres 16 + pgvector: policy_chunks, resolved_tickets
+          Ollama: nomic-embed-text (768-dim) · Anthropic or Ollama for chat
+
+  Agent (agent/), v2: harness, bounded tool loop, token budgeter,
+  tool registry, OpenTelemetry tracing, optional graph layer
+        ports: ProviderAdapter · TriageServices · RunStore
+        adapters: Anthropic, Ollama · pgvector services · Drizzle run store
+        (agent_runs, agent_steps, token_ledger, triage_results)
+
+  Eval sidecar (evals/, Python): trajectory and answer metrics over golden cases
+  Observability (observability/): OTel collector → Jaeger + Prometheus
 ```
 
-The MCP server is a thin interface layer. It shares the same Drizzle client
-and pgvector tables as the existing Express API — no duplicated retrieval or
-business logic, no drift between "the app" and "the MCP server."
+The agent package depends only on interfaces for providers, retrieval and
+persistence, so its loop, budgeting and tool dispatch are tested with fakes and
+no database or model. Its retrieval tools run against the same pgvector
+corpora as the v1 pipeline. It is exercised today through its smoke script;
+its HTTP routes are defined but not yet mounted by the Express API. See
+[agent/README.md](agent/README.md).
 
-## What's implemented
+## Repository layout
 
-| Tool | Backs onto |
+| Path | What it is |
 |---|---|
-| `search_policies` | pgvector cosine search over `policy_chunks` |
-| `find_similar_tickets` | pgvector cosine search over `resolved_tickets` |
-| `triage_ticket` | full agent loop: retrieval + Claude reasoning + structured output |
-| `get_eval_metrics` | reads latest DeepEval sidecar JSON report |
+| `src/components`, `src/lib` | React + Vite reviewer UI |
+| `server/` | Express API, v1 LLM provider registry, Drizzle repositories, grounded drafting |
+| `src/index.ts` | MCP server: tools, resources, prompt |
+| `agent/` | v2 agent: harness, loop, budgeter, registry, tracing, providers, graph layer, pgvector services. Own `package.json` |
+| `rag/` | Corpus schema, chunking and ingest pipeline. Own `package.json` |
+| `evals/` | Python eval sidecar: DeepEval answer metrics and trajectory metrics over 42 golden cases |
+| `observability/` | OTel collector, Jaeger and Prometheus compose stack |
+| `docs/demo.md` | End-to-end walkthrough of the running system |
 
-| Resource URI | Returns |
-|---|---|
-| `policy://chunk/{id}` | Raw text of a specific policy chunk |
-| `ticket://{id}` | Full resolved ticket record |
-| `ticket://{id}/resolution` | Just the resolution summary |
-| `eval://latest` | Latest DeepEval run, all four metrics |
+## Quick start
 
-One prompt (`triage_summary_for_manager`) is included to demonstrate all
-three MCP primitives, not just tools.
-
-## Setup
+Prerequisites: Node 20+, Docker, and [Ollama](https://ollama.com) with the
+embedding model and a tool-capable chat model pulled. An Anthropic API key is
+optional; without one, everything runs locally on Ollama.
 
 ```bash
-git clone <this-repo>
-cd benefits-support-triage-mcp
-npm install
-cp .env.example .env   # set DATABASE_URL, OLLAMA_URL, EVAL_REPORT_PATH
-npm run build
+ollama pull nomic-embed-text
+ollama pull qwen2.5                 # or llama3.1; must support tool calling
+
+git clone https://github.com/juubaker/BenefitsSupportTriage.git
+cd BenefitsSupportTriage
+cp .env.example .env                # set ANTHROPIC_API_KEY if you have one
+
+npm ci
+npm run db:setup                    # starts Postgres (host port 5433), migrates, seeds
+npm run dev                         # API on :3001, UI on the Vite URL it prints
 ```
 
-Wire up the schema and business logic to your real implementation:
-
-1. `src/db.ts` — point at your existing `rag/db/client.ts` and `rag/db/schema.ts`
-2. `src/embeddings.ts` — point at your existing Ollama embed wrapper
-3. `src/triage.ts` — extract your existing Express route's agent-loop logic here
-4. `src/eval.ts` — point `EVAL_REPORT_PATH` at your DeepEval sidecar's output
-
-Everywhere a change is needed is marked `// SCHEMA:` or `SCHEMA` in the file
-header comments.
-
-## Running it
-
-**Standalone (for local dev):**
+Load the RAG corpora (policy chunks and resolved tickets) before using
+grounded drafts or the MCP retrieval tools:
 
 ```bash
-npm run dev
+cd rag && npm ci
+npm run db:enable && npm run db:migrate && npm run ingest
 ```
 
-**Inspect without an LLM in the loop (do this first, always):**
+Then apply the agent's tables:
 
 ```bash
-npm run build
-npm run inspect
+psql "$DATABASE_URL" -f agent/src/db/migrations/0001_triage_results.sql
 ```
 
-Opens a web UI at the printed URL. List tools, call `search_policies` with a
-real query, confirm you get ranked results with similarity scores before
-wiring this into any host.
+[RUNBOOK.md](RUNBOOK.md) covers setup, configuration and troubleshooting in
+depth.
 
-**Claude Desktop:**
+## Running the other pieces
 
-Add to `claude_desktop_config.json`:
+**MCP server**
+
+```bash
+npm run mcp:build
+npm run mcp:inspect                 # MCP Inspector: call the tools with no LLM in the loop
+```
+
+Register it with Claude Desktop in `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "benefits-support-triage": {
       "command": "node",
-      "args": ["/absolute/path/to/benefits-support-triage-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/BenefitsSupportTriage/dist/index.js"],
       "env": {
-        "DATABASE_URL": "postgres://postgres:postgres@localhost:5433/benefits_triage",
+        "DATABASE_URL": "postgresql://triage:triage@localhost:5433/triage",
         "OLLAMA_URL": "http://localhost:11434"
       }
     }
@@ -127,88 +120,103 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. The four tools appear under the hammer icon.
+Or with Claude Code: `claude mcp add benefits-support-triage -- node /absolute/path/to/dist/index.js`.
 
-**Claude Code:**
+| Tool | Does |
+|---|---|
+| `search_policies` | pgvector cosine search over `policy_chunks`, with chunk ids and similarity scores |
+| `find_similar_tickets` | pgvector cosine search over `resolved_tickets` |
+| `triage_ticket` | Retrieval plus a structured classification, with `retrieval_evidence` and `requires_human_review` |
+| `get_eval_metrics` | Reads an answer-quality report from `EVAL_REPORT_PATH`; returns a placeholder until one exists (see Status) |
+
+Resources: `policy://chunk/{id}`, `ticket://{id}`, `ticket://{id}/resolution`,
+`eval://latest`. Prompt: `triage_summary_for_manager`.
+
+**Agent loop**
 
 ```bash
-claude mcp add benefits-support-triage -- node /absolute/path/to/dist/index.js
+cd agent && npm ci --legacy-peer-deps
+npm run smoke -- --fake                 # scripted provider, no model: checks loop mechanics
+npm run smoke                           # a real model on local Ollama
+npm run smoke -- --provider anthropic   # same, on Claude (needs ANTHROPIC_API_KEY)
 ```
 
-## Demo script (for interviews)
+The smoke script runs one ticket against a small in-memory corpus and store,
+so it tests the loop and provider mechanics rather than retrieval quality.
 
-Structured as a 5-minute walkthrough. Each step has a specific point to make
-— don't just click through it.
+**Tracing**
 
-### 1. Open with the problem (30 sec)
+```bash
+docker compose -f observability/docker-compose.observability.yml up -d
+```
 
-"Most RAG demos show you an answer and ask you to trust it. I wanted a demo
-where the retrieval quality is checkable, live, by anyone — not just visible
-in my app's UI."
+The agent's tracer exports OTLP to `localhost:4318` (set
+`OTEL_EXPORTER_OTLP_ENDPOINT` to change it), with Jaeger at
+http://localhost:16686 and span metrics in Prometheus at http://localhost:9090.
+Traced runs will appear there once the agent route is mounted; until then the
+span structure is covered by `agent/tests/tracing.test.ts`.
 
-### 2. Show retrieval in isolation (1 min)
+**Evals**
 
-In Claude Desktop:
+```bash
+cd evals
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest test_eval.py -q            # harness self-tests: metrics, loaders, scorecard
+```
 
-> "Search the benefits policy corpus for HSA contribution limits for family
-> coverage."
+The golden set has 42 cases across base, multi-hop, adversarial, out-of-scope,
+budget and graph buckets, scored by seven deterministic trajectory metrics and
+a judge-model pass. The suite runner (`python -m run --suite smoke|nightly`)
+needs a `wiring.py` (copy `wiring.example.py`) and an HTTP endpoint that runs
+the agent, which is not mounted yet. See [evals/README.md](evals/README.md) and
+[evals/V2_CONSOLIDATION.md](evals/V2_CONSOLIDATION.md).
 
-Claude calls `search_policies`. Point out the response includes
-**similarity scores and chunk IDs**, not just text — the retrieval is
-auditable, not a black box.
+## Tests
 
-### 3. Show precedent search (1 min)
+```bash
+npm test                                          # web UI + Express API (Vitest)
+cd agent && npx vitest run && npx tsc --noEmit    # agent package
+```
 
-> "Have we seen tickets like 'can I change my HSA contribution mid-year' before?"
+The root suite skips its Postgres integration tests unless `TEST_DATABASE_URL`
+is set. On every pull request, CI (`.github/workflows/eval.yml`) typechecks
+and tests the agent package against Postgres with pgvector and runs the eval
+harness self-tests. The eval smoke gate and nightly suite are defined in the
+workflow but commented out until the agent endpoint they call is mounted.
 
-Claude calls `find_similar_tickets`. This demonstrates the dual-corpus design
-— policy language and operational precedent are separate retrieval paths
-that a triage decision should draw on both.
+## Status
 
-### 4. Run full triage (1 min)
+In place: the v1 reviewer pipeline, the MCP server, and the v2 agent package
+(harness, budgeter, tracing, graph layer) with its retrieval tools on the live
+pgvector corpora, plus the eval harness and golden set. In progress:
 
-> "Triage this ticket: 'My spouse just lost their job and I need to change my
-> health plan mid-year, is that allowed?'"
+- **Mounting the agent.** The agent's `/api/triage` route (SSE) is not yet
+  mounted by the Express API, so the reviewer UI and the eval runner still
+  can't call it. This also unblocks the CI eval gates.
+- **Consolidating retrieval.** Embedding and vector search still exist in
+  `server/rag`, `rag/lib` and `src/` alongside `agent/src/services`, which will
+  replace them.
+- **One schema.** `server/db`, `rag/db` and `agent/src/db` each have their own
+  Drizzle schema and migrations, to be merged into one journal.
+- **MCP triage on the agent loop.** `triage_ticket` runs a single
+  retrieval-then-classify pass in `src/triage.ts` rather than the agent loop.
+- **Eval metrics over MCP.** `get_eval_metrics` expects the v1 four-metric
+  report format; the v2 runner writes a trajectory scorecard in a different
+  format, so the tool returns a placeholder until the two are reconciled.
+- **Citation keys.** Ingest does not yet populate `policy_chunks.chunk_key`, so
+  real-retrieval citations won't match the golden set's chunk slugs.
+- **Root tests in CI.** The web UI and Express suite runs locally but not yet
+  in the workflow.
 
-Claude calls `triage_ticket`. Show the output includes
-`retrieval_evidence` (which chunks/tickets it actually used) and
-`requires_human_review` — the system is honest about its own confidence
-rather than always sounding certain.
+## Further reading
 
-### 5. The payoff — eval metrics on demand (1.5 min)
+- [TECH_SPEC.md](TECH_SPEC.md): goals, taxonomy, design decisions
+- [RUNBOOK.md](RUNBOOK.md): setup and operations
+- [agent/README.md](agent/README.md): the agent package and its ports
+- [evals/README.md](evals/README.md): evaluation approach
+- [docs/demo.md](docs/demo.md): walkthrough
 
-> "How do you know this retrieval is actually good?"
+## License
 
-> "Show me the latest RAG eval metrics for this system."
-
-Claude calls `get_eval_metrics`, returning contextual precision/recall,
-faithfulness, and answer relevancy from your 15-case DeepEval golden dataset.
-This is the answer to the RAG-evaluation question that doesn't rely on you
-asserting it — it's a live, re-runnable number.
-
-### Close
-
-"The MCP server is what let me expose this outside my own UI — the tools are
-the same code path as the production API, so this isn't a separate demo
-system, it's the real thing wrapped in a standard interface."
-
-## Why this is a stronger artifact than a UI screenshot
-
-- **Portability**: works in any MCP host, not just your custom frontend
-- **Auditability**: every tool response carries retrieval provenance (IDs,
-  similarity scores) — nothing is asserted without evidence attached
-- **Honesty**: `requires_human_review` and eval metrics mean the system
-  reports its own limits instead of always sounding confident
-- **No duplicated logic**: same Drizzle client and triage pipeline as the
-  production Express API — this isn't a toy reimplementation
-
-## Roadmap (mention if asked "what's next")
-
-- Swap stdio for Streamable HTTP + OAuth 2.1 to make this a remote server
-  other teams could point their own MCP hosts at
-- Add a `flag_policy_gap` tool that lets the triage output feed back into a
-  queue for policy-writing review when `requires_human_review` fires often
-  for the same category
-- Wrap NexusAgent as an MCP *host* so its policy engine and audit logging
-  govern calls into this server (and other third-party MCP servers) —
-  the enterprise-governance story
+See [LICENSE](LICENSE).
