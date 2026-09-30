@@ -60,7 +60,7 @@ async function collect(turns: ScriptedTurn[], opts: Parameters<AgentHarness["run
   const harness = new AgentHarness({
     providers: { ollama: provider },
     defaultProvider: "ollama",
-    registry,
+    registryFor: () => registry,
     store,
     systemPrompt: "test system prompt",
   });
