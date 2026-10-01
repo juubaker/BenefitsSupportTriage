@@ -31,7 +31,9 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "node scripts/seed.js",
     "db:setup": "npm run db:up && npm run db:wait && npm run db:migrate && npm run db:seed",
-    "db:reset": "docker compose down -v && npm run db:setup"
+    "db:reset": "docker compose down -v && npm run db:setup",
+    "agent:build": "npm --prefix agent run build",
+    "agent:install": "npm --prefix agent install --legacy-peer-deps"
   },
   "bin": {
     "benefits-triage-mcp": "dist/index.js"

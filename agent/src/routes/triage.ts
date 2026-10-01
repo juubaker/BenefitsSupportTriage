@@ -13,8 +13,14 @@ const bodySchema = z.object({
  * POST /api/triage — runs the agent and streams AgentEvents over SSE.
  * Client disconnect aborts the run via AbortController -> terminal "aborted".
  */
-export function triageRouter(harness: AgentHarness): Router {
+export type HarnessSource = AgentHarness | ((ticketId: string) => AgentHarness);
+
+export function triageRouter(source: HarnessSource): Router {
   const router = Router();
+  // A factory is the normal case: the terminal tools are bound per ticket, so
+  // the registry (and therefore the harness) is built per request.
+  const resolve = (ticketId: string): AgentHarness =>
+    typeof source === "function" ? source(ticketId) : source;
 
   router.post("/api/triage", async (req: Request, res: Response) => {
     const parsed = bodySchema.safeParse(req.body);
@@ -41,6 +47,7 @@ export function triageRouter(harness: AgentHarness): Router {
     };
 
     try {
+      const harness = resolve(ticket.ticketId);
       for await (const event of harness.run(ticket, { provider, signal: abort.signal })) {
         // step_completed carries the full persisted record; the client only needs the lean stream.
         if (event.type === "step_completed") continue;

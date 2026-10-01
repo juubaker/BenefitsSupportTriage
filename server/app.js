@@ -41,6 +41,10 @@ export { extractJson };
  *   repos       — { postsRepo, categorizationsRepo, draftsRepo }
  *   providers   — { triage, draft } each implementing LLMProvider
  *   llmProvider — single provider shortcut (back-compat); maps to both
+ *   agentRouter — the v2 agent's SSE router (POST /api/triage), or null.
+ *                 Built in server/index.js from the agent package; left null
+ *                 in tests and when the agent build is absent, in which case
+ *                 the route answers 503 with how to enable it rather than 404.
  */
 export function createApp({
   postsRepo = defaultPostsRepo,
@@ -49,6 +53,7 @@ export function createApp({
   ragRepo = defaultRagRepo,          // ← add
   providers = null,
   llmProvider = null,
+  agentRouter = null,
 } = {}) {
   // Accept three injection shapes:
   //   1. providers: { triage, draft }      — per-route
@@ -228,5 +233,20 @@ export function createApp({
       res.status(500).json({ error: e.message });
     }
   });
+  // v2 agent. Mounted after the v1 routes so it can only add surface, never
+  // shadow it. The Express 5 router from the agent package is plain
+  // middleware, so it composes with this Express 4 app.
+  if (agentRouter) {
+    app.use(agentRouter);
+  } else {
+    app.post('/api/triage', (_req, res) => {
+      res.status(503).json({
+        error: 'Agent not available',
+        detail:
+          'Build the agent package and set DATABASE_URL to enable it: npm run agent:build, then restart the server.',
+      });
+    });
+  }
+
   return app;
 }
