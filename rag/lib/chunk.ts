@@ -2,6 +2,9 @@ export interface Chunk {
   text: string;
   section?: string;
   planType?: string;
+  // Stable citation id from a `{#chunk-...}` heading attribute. Golden eval
+  // cases reference these, so they must survive re-ingest (serial ids don't).
+  chunkKey?: string;
 }
 
 // Sections that apply to one specific plan type rather than to plans in
@@ -10,6 +13,7 @@ export interface Chunk {
 // general-eligibility sentence without making that chunk dental-specific.
 const SECTION_PLAN_TYPE: Record<string, string> = {
   "eligibility and limits": "HDHP", // HSA section — HDHP-only by policy
+  "hsa contribution limits for 2026": "HDHP",
 };
 
 export function inferPlanType(section: string | undefined): string | undefined {
@@ -27,7 +31,8 @@ export function inferPlanType(section: string | undefined): string | undefined {
  *
  * It also recognizes Markdown-style headings (`#`, `##`, ...) and tags every
  * chunk with the most recent heading as its `section`, which gives you a
- * human-readable citation label for free.
+ * human-readable citation label for free. A heading may end in `{#key}`; the
+ * section's first chunk gets that key, later chunks get `key-2`, `key-3`, ...
  */
 export function chunkText(
   raw: string,
@@ -44,10 +49,18 @@ export function chunkText(
   const chunks: Chunk[] = [];
   let buf = "";
   let currentSection: string | undefined;
+  let currentKey: string | undefined;
+  let keyCount = 0;
+
+  const push = (text: string) => {
+    keyCount++;
+    const chunkKey = currentKey && (keyCount === 1 ? currentKey : `${currentKey}-${keyCount}`);
+    chunks.push({ text, section: currentSection, planType: inferPlanType(currentSection), chunkKey });
+  };
 
   const flush = () => {
     const text = buf.trim();
-    if (text) chunks.push({ text, section: currentSection, planType: inferPlanType(currentSection) });
+    if (text) push(text);
     // carry overlap from the tail of the last chunk
     buf = overlapChars > 0 ? text.slice(-overlapChars) : "";
   };
@@ -57,7 +70,10 @@ export function chunkText(
     if (heading) {
       // headings start a new logical section; flush what we had
       if (buf.trim()) flush();
-      currentSection = heading[1].trim();
+      const attr = heading[1].match(/^(.*?)\s*\{#([\w-]+)\}\s*$/);
+      currentSection = (attr ? attr[1] : heading[1]).trim();
+      currentKey = attr?.[2];
+      keyCount = 0;
       buf = "";
       continue;
     }
@@ -67,8 +83,7 @@ export function chunkText(
     }
     buf = buf ? `${buf}\n\n${block}` : block;
   }
-  if (buf.trim())
-    chunks.push({ text: buf.trim(), section: currentSection, planType: inferPlanType(currentSection) });
+  if (buf.trim()) push(buf.trim());
 
   return chunks;
 }

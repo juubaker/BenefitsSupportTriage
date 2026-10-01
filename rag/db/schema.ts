@@ -52,6 +52,9 @@ export const policyChunks = pgTable(
     // Which plan(s) this chunk applies to. Null means it applies to any plan
     // (e.g. general eligibility rules) rather than one specific plan type.
     planType: text("plan_type"),
+    // Stable citation id (e.g. "chunk-qle-12"). Column + partial unique index
+    // are created by BenefitsSupportTriage/agent migration 0001.
+    chunkKey: text("chunk_key"),
     embedding: vector("embedding", { dimensions: EMBED_DIM }).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
