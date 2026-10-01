@@ -41,6 +41,8 @@ def load_run_data(conn, run_id: str) -> RunData:
     submitted_citations: list[str] = []
     observed_ids: set[str] = set()
     escalated = False
+    submitted_category: str | None = None
+    submitted_priority: str | None = None
 
     for _step_no, tool_calls, results_summary in step_rows:
         calls = _as_list(tool_calls)
@@ -51,6 +53,8 @@ def load_run_data(conn, run_id: str) -> RunData:
             if name == "triage_ticket":
                 submitted_citations.extend(args.get("citations", []) or [])
                 escalated = escalated or bool(args.get("escalated"))
+                submitted_category = args.get("category") or submitted_category
+                submitted_priority = args.get("priority") or submitted_priority
             elif name == "escalate_to_human":
                 escalated = True
         # observed ids come from the tool-result summaries persisted per step
@@ -65,6 +69,8 @@ def load_run_data(conn, run_id: str) -> RunData:
         submitted_citations=submitted_citations,
         observed_ids=observed_ids,
         escalated=escalated,
+        submitted_category=submitted_category,
+        submitted_priority=submitted_priority,
     )
 
 
@@ -77,10 +83,15 @@ def _as_list(v) -> list[dict]:
 
 
 def _extract_ids(summary: str) -> set[str]:
-    """Chunk/ticket ids look like chunk-xxx-nn or R-nnnn in the summaries."""
+    """Chunk/ticket ids as the tools write them into agent_steps summaries.
+
+    Policy chunks are "chunk-" plus one or more dash-separated segments
+    (chunk-qle-12 from chunk_key, chunk-312 from the serial-id fallback);
+    resolved tickets are R-nnnn.
+    """
     import re
 
-    return set(re.findall(r"\b(?:chunk-[a-z0-9]+-\d+|R-\d+)\b", summary))
+    return set(re.findall(r"\b(?:chunk-[a-z0-9]+(?:-[a-z0-9]+)*|R-\d+)\b", summary))
 
 
 # ---------------------------------------------------------------------------

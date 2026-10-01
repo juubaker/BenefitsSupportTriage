@@ -114,10 +114,12 @@ The suite is built around 42 golden cases across six buckets:
 | budget | runs that must finish cleanly under a tight token budget |
 | graph | multi-entity questions for the optional graph layer |
 
-Two kinds of metric run over recorded agent runs. Deterministic trajectory
-metrics check things like whether the agent searched before deciding and
-whether every citation appeared in an earlier tool result. A judge-model pass
-scores answer faithfulness and reasoning quality. The command above runs the
+Two kinds of metric run over recorded agent runs. Deterministic metrics check
+the trajectory (did it search before deciding, did every citation appear in an
+earlier tool result, did it stay inside its step and token limits) and the
+decision (is the category and priority the expected one, did it cite every
+passage the case says matters). A judge-model pass scores reasoning quality
+against each case's rubric. The command above runs the
 harness's own self-tests, which check the metrics, loaders and scorecard
 against synthetic runs.
 

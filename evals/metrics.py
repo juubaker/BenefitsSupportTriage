@@ -27,6 +27,9 @@ class RunData:
     # every chunk/ticket id that actually appeared in a tool result this run
     observed_ids: set[str]
     escalated: bool
+    # the decision the run submitted to triage_ticket (None when it escalated)
+    submitted_category: str | None = None
+    submitted_priority: str | None = None
 
     @property
     def all_tools(self) -> list[str]:
@@ -99,6 +102,56 @@ def escalation_correctness(case: GoldenCase, run: RunData) -> MetricResult:
     return MetricResult("escalation_correctness", float(ok), ok, detail)
 
 
+def outcome_correctness(case: GoldenCase, run: RunData) -> MetricResult:
+    """Did the agent reach the right decision, not just reach one cleanly?
+
+    Skipped (passing) for cases that declare no expected category, which is
+    how escalation cases are written — escalation_correctness covers those.
+    """
+    expected_cat = case.outcome.category
+    expected_pri = case.outcome.priority
+    if expected_cat is None and expected_pri is None:
+        return MetricResult("outcome_correctness", 1.0, True, "n/a: no expected outcome")
+
+    def norm(v: str | None) -> str | None:
+        return v.strip().lower() if isinstance(v, str) else None
+
+    cat_ok = expected_cat is None or norm(run.submitted_category) == norm(expected_cat)
+    pri_ok = expected_pri is None or norm(run.submitted_priority) == norm(expected_pri)
+    ok = cat_ok and pri_ok
+    detail = (
+        "ok"
+        if ok
+        else f"category={run.submitted_category!r} expected={expected_cat!r} "
+        f"priority={run.submitted_priority!r} expected={expected_pri!r}"
+    )
+    return MetricResult("outcome_correctness", float(ok), ok, detail)
+
+
+# Fraction of the expected grounding ids a run must cite. 1.0 means every one:
+# a multi-hop case that cites only the QLE chunk and not the COBRA chunk
+# answered half the ticket, however fluent the prose.
+GROUNDING_RECALL_THRESHOLD = 1.0
+
+
+def grounding_recall(case: GoldenCase, run: RunData) -> MetricResult:
+    """Were the passages the case says matter actually cited?
+
+    retrieval_grounding is the inverse check: it catches citations that were
+    never retrieved. This one catches evidence that was required and missed.
+    """
+    expected = [i for i in case.outcome.grounding_ids if i]
+    if not expected:
+        return MetricResult("grounding_recall", 1.0, True, "n/a: no expected grounding ids")
+    cited = set(run.submitted_citations)
+    found = [i for i in expected if i in cited]
+    recall = len(found) / len(expected)
+    ok = recall >= GROUNDING_RECALL_THRESHOLD
+    missing = [i for i in expected if i not in cited]
+    detail = f"recall={recall:.2f}" + ("" if ok else f" missing={missing}")
+    return MetricResult("grounding_recall", recall, ok, detail)
+
+
 DETERMINISTIC_METRICS = [
     tool_choice_correctness,
     step_efficiency,
@@ -107,6 +160,8 @@ DETERMINISTIC_METRICS = [
     min_retrieval,
     token_budget_adherence,
     escalation_correctness,
+    outcome_correctness,
+    grounding_recall,
 ]
 
 

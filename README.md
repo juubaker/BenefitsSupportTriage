@@ -166,8 +166,8 @@ python -m pytest test_eval.py -q            # harness self-tests: metrics, loade
 ```
 
 The golden set has 42 cases across base, multi-hop, adversarial, out-of-scope,
-budget and graph buckets, scored by seven deterministic trajectory metrics and
-a judge-model pass. The suite runner (`python -m run --suite smoke|nightly`)
+budget and graph buckets, scored by nine deterministic metrics (seven on the
+trajectory, two on the decision itself) and a judge-model pass. The suite runner (`python -m run --suite smoke|nightly`)
 needs a `wiring.py` (copy `wiring.example.py`) and an HTTP endpoint that runs
 the agent, which is not mounted yet. See [evals/README.md](evals/README.md) and
 [evals/V2_CONSOLIDATION.md](evals/V2_CONSOLIDATION.md).
