@@ -61,6 +61,21 @@ Cost/time note: 15 cases x 4 LLM-as-judge metrics ≈ 60+ judge calls per
 run. Expect a few minutes and a nontrivial number of tokens. Use the
 single-case mode while iterating.
 
+### Retrieval-only check (free, local)
+
+`retrieval_eval.py` scores policy search alone against the `grounding_ids`
+in `golden/*.yaml` — Ollama + Postgres, no judge calls. Run it before the
+suite above; if the right chunk isn't retrieved, generation metrics can't
+tell you much.
+
+```bash
+python retrieval_eval.py            # hit@1/@3, recall@k, MRR + threshold sweep
+```
+
+Grounding ids resolve via `policy_chunks.chunk_key`, which ingest sets from
+`{#chunk-...}` heading attributes in `rag/docs/policies/*.md`. Cases whose
+labeled chunks aren't in the corpus are scored as "should return nothing".
+
 ## Reading failures
 
 | Failing metric        | It's a...          | Look at                                             |

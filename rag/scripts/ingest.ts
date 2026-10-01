@@ -50,6 +50,7 @@ async function ingestPolicies() {
         chunkText: c.text,
         sourceUrl: null, // set if you host the policy docs somewhere
         planType: c.planType ?? null,
+        chunkKey: c.chunkKey ?? null,
         embedding,
       });
       total++;
