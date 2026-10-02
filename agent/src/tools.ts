@@ -56,12 +56,29 @@ export const finalResultSchema = z.preprocess((raw) => {
 
 export const TRIAGE_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 
+/** JSON-encoded arrays and string booleans are what smaller models send. */
+const citationList = z.preprocess((v) => {
+  if (typeof v !== "string") return v;
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed : v;
+  } catch {
+    // Not JSON: treat a bare or comma-separated list as ids.
+    return v.split(",").map((p) => p.trim()).filter(Boolean);
+  }
+}, z.array(z.string()));
+
+const notEscalated = z.preprocess(
+  (v) => (typeof v === "string" && v.trim().toLowerCase() === "false" ? false : v),
+  z.literal(false),
+);
+
 export const triageResultSchema = z.object({
   category: z.enum(TRIAGE_CATEGORIES),
   priority: z.enum(TRIAGE_PRIORITIES),
   summary: z.string().min(1),
-  citations: z.array(z.string()).default([]),
-  escalated: z.literal(false).default(false),
+  citations: citationList.default([]),
+  escalated: notEscalated.default(false),
 });
 
 export function buildRegistry(services: TriageServices): ToolRegistry {

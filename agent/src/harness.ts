@@ -132,6 +132,11 @@ export class AgentHarness {
           // the generator does run to completion.
           totals.input += event.record.usage.inputTokens;
           totals.output += event.record.usage.outputTokens;
+          // Same reason as the totals: the loop's return value carries the
+          // authoritative count, but a consumer that breaks on `terminal`
+          // disposes the generator before it. step_efficiency scores against
+          // this, so a run row saying 0 steps makes the metric meaningless.
+          stepCount = event.record.stepNo;
         }
         if (event.type === "terminal") {
           // Record the state as it passes through, not only from the loop's
