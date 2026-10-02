@@ -184,6 +184,12 @@ export async function* runLoop(
       runId,
       stepNo: step,
       modelStopReason: turn.stopReason,
+      // Raw model arguments for now; replaced below with the validated form
+      // for every call that passed. The eval reads citations from this field,
+      // and smaller models send them as a JSON string that coercion fixes — so
+      // persisting the raw text scores a correct answer as a fabricated one.
+      // A call that FAILED validation keeps its raw args: that is the whole
+      // diagnostic for why it failed.
       toolCalls: turn.toolCalls.map((c) => ({ name: c.name, args: c.input })),
       toolResultsSummary: [],
       scratchpad: turn.text,
@@ -281,6 +287,8 @@ export async function* runLoop(
           summary: res.output.summary,
           isError: false,
         };
+        const idx = turn.toolCalls.indexOf(call);
+        if (idx >= 0) record.toolCalls[idx].args = res.validatedArgs;
         if (registry.isTerminal(call.name)) {
           terminalResult = res.validatedArgs as TriageResult;
         }

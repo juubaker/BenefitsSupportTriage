@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AgentHarness, MemoryRunStore } from "../src/harness.js";
 import { ToolRegistry } from "../src/registry.js";
 import { FakeProvider, type ScriptedTurn } from "../src/testing/fake-provider.js";
+import { triageResultSchema } from "../src/tools.js";
 import type { AgentEvent, TriageRequest } from "../src/types.js";
 
 const TICKET: TriageRequest = {
@@ -25,7 +26,8 @@ function buildTestRegistry() {
   registry.register({
     name: "search_policies",
     description: "search",
-    schema: z.object({ query: z.string().min(3), k: z.number().int().default(5) }),
+    // Mirrors the real tool: coercion is part of what these tests exercise.
+    schema: z.object({ query: z.string().min(3), k: z.coerce.number().int().default(5) }),
     handler: async (args) => {
       calls.push({ name: "search_policies", args });
       return {
@@ -37,13 +39,7 @@ function buildTestRegistry() {
   registry.register({
     name: "triage_ticket",
     description: "terminal",
-    schema: z.object({
-      category: z.string(),
-      priority: z.enum(["low", "medium", "high", "urgent"]),
-      summary: z.string(),
-      citations: z.array(z.string()),
-      escalated: z.boolean(),
-    }),
+    schema: triageResultSchema,
     terminal: true,
     handler: async (args) => {
       calls.push({ name: "triage_ticket", args });
@@ -383,5 +379,35 @@ describe("cost accounting", () => {
 
     expect(run.totalInputTokens).toBeGreaterThan(0);
     expect(run.totalCostUsd).toBe(0);
+  });
+});
+
+describe("persisted tool arguments", () => {
+  it("stores the validated form, so the eval reads ids and not raw JSON text", async () => {
+    // llama3.1 sends citations as a JSON string; coercion fixes the call, but
+    // the eval reads agent_steps.tool_calls, so persisting the raw text scored
+    // a correct answer as a fabricated citation.
+    const { store } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: "5" } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: { ...FINAL, citations: '["chunk-qle-12"]' } }] },
+    ]);
+
+    const steps = [...store.steps];
+    const triage = steps.flatMap((s) => s.toolCalls).find((c) => c.name === "triage_ticket");
+    expect((triage?.args as { citations: string[] }).citations).toEqual(["chunk-qle-12"]);
+
+    const search = steps.flatMap((s) => s.toolCalls).find((c) => c.name === "search_policies");
+    expect((search?.args as { k: number }).k).toBe(5);
+  });
+
+  it("keeps the raw arguments when validation failed, which is the diagnostic", async () => {
+    const { store } = await collect([
+      { text: "Guessing.", toolCalls: [{ name: "search_policies", input: { q: "wrong field" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    const failed = [...store.steps][0].toolCalls[0];
+    expect(failed.args).toEqual({ q: "wrong field" });
   });
 });
