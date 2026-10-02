@@ -69,7 +69,7 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       "Semantic search over benefits policy documents. Returns policy chunks with ids and relevance scores. Refine and call again if the first results do not cover every part of the ticket.",
     schema: z.object({
       query: z.string().min(3),
-      k: z.number().int().min(1).max(10).default(5),
+      k: z.coerce.number().int().min(1).max(10).default(5),
     }),
     handler: async ({ query, k }, ctx) => {
       const rows = await services.searchPolicies(query, k);
@@ -90,12 +90,22 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
     name: "find_similar_tickets",
     description:
       "Find previously resolved support tickets similar to a description. Use to check how comparable cases were resolved.",
-    schema: z.object({
-      description: z.string().min(3),
-      k: z.number().int().min(1).max(10).default(3),
-    }),
-    handler: async ({ description, k }, ctx) => {
-      const rows = await services.findSimilarTickets(description, k);
+    schema: z
+      .object({
+        // `query` matches search_policies: two names for the same concept
+        // across sibling tools is a trap for smaller models, which reliably
+        // sent `query` here and failed validation. `description` stays
+        // accepted so existing prompts and transcripts keep working.
+        query: z.string().min(3).optional(),
+        description: z.string().min(3).optional(),
+        k: z.coerce.number().int().min(1).max(10).default(3),
+      })
+      .refine((v) => Boolean(v.query ?? v.description), {
+        message: "query is required",
+        path: ["query"],
+      }),
+    handler: async ({ query, description, k }, ctx) => {
+      const rows = await services.findSimilarTickets((query ?? description)!, k);
       note(ctx.runId, rows.map((r) => r.ticketId));
       return {
         data: rows,

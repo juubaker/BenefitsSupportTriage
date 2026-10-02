@@ -233,3 +233,55 @@ describe("buildRegistry citation enforcement", () => {
     expect(res.kind).toBe("validation");
   });
 });
+
+describe("tool schemas against what smaller models actually send", () => {
+  const services = {
+    searchPolicies: async () => [{ chunkId: "chunk-qle-12", text: "…", score: 0.8 }],
+    findSimilarTickets: async () => [{ ticketId: "R-2201", resolution: "…", score: 0.77 }],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const ctx = { runId: "run-1", step: 1 };
+
+  it('accepts k as a string, which llama3.1 sends ("10" not 10)', async () => {
+    const res = await buildRegistry(services).execute(
+      "search_policies",
+      { query: "spouse added mid-year", k: "10" },
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts query on find_similar_tickets, not just description", async () => {
+    const registry = buildRegistry(services);
+
+    const withQuery = await registry.execute(
+      "find_similar_tickets",
+      { query: "spouse added mid-year", k: 3 },
+      ctx,
+    );
+    const withDescription = await registry.execute(
+      "find_similar_tickets",
+      { description: "spouse added mid-year", k: 3 },
+      ctx,
+    );
+
+    expect(withQuery.ok).toBe(true);
+    expect(withDescription.ok).toBe(true);
+  });
+
+  it("still rejects a find_similar_tickets call with neither", async () => {
+    const res = await buildRegistry(services).execute("find_similar_tickets", { k: 3 }, ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+  });
+
+  it("exposes every tool as JSON schema for the model", () => {
+    // A transform in a tool schema throws here rather than at registration,
+    // so this guards the whole registry, not just the tool under test.
+    expect(() => buildRegistry(services).specs()).not.toThrow();
+  });
+});
