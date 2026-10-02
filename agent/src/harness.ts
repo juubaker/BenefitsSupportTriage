@@ -124,6 +124,22 @@ export class AgentHarness {
           return;
         }
         const event = value;
+        if (event.type === "step_completed") {
+          // The loop's return value carries authoritative totals, but a client
+          // that breaks on `terminal` (the SSE route) disposes the generator
+          // before that return is observed. Accumulating per step means the
+          // run row is right either way; the final assignment below wins when
+          // the generator does run to completion.
+          totals.input += event.record.usage.inputTokens;
+          totals.output += event.record.usage.outputTokens;
+        }
+        if (event.type === "terminal") {
+          // Record the state as it passes through, not only from the loop's
+          // return value: a consumer that breaks on this event (the SSE route
+          // does) disposes the generator before that return is observed, and
+          // the run would otherwise be filed as aborted.
+          terminal = event.state;
+        }
         if (event.type === "step_started" && runScope) {
           stepScope = tracing!.startStep(runScope, event.step);
         }

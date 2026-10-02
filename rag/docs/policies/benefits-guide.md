@@ -25,10 +25,16 @@ event.
 
 ## Qualifying life events {#chunk-qle-12}
 
-Qualifying life events include marriage, divorce, birth or adoption of a child,
-loss of other coverage, and a change in employment status. An employee has 31
-days from the date of the event to make a corresponding change to their
-elections.
+A qualifying life event lets an employee change coverage mid-year, outside open
+enrollment. Qualifying events include getting married; a divorce or legal
+separation; the birth, adoption, or foster placement of a child; a child
+turning 26 and aging off the plan; a spouse or domestic partner losing or
+gaining coverage through their own employer, including after a layoff or job
+change; a change between full-time and part-time status; and a permanent move
+out of a plan's service area. The employee has 31 days from the date of the
+event to add or drop a dependent, switch plans, or change an election, and the
+change must be consistent with the event. Miss the 31 days and the next
+opportunity is open enrollment.
 
 # Health Savings Account (HSA)
 

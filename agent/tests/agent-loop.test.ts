@@ -165,3 +165,34 @@ describe("agent loop", () => {
     expect([...store.runs.values()][0].terminalState).toBe("aborted");
   });
 });
+
+describe("run totals when the consumer stops at terminal", () => {
+  it("records token usage even if the generator is disposed early", async () => {
+    // The SSE route breaks out of the for-await on the terminal event, which
+    // disposes the loop generator before its return value — the authoritative
+    // totals — is ever observed. The run row must still be right.
+    const { registry } = buildTestRegistry();
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: {
+        ollama: new FakeProvider([
+          { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+          { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+        ]),
+      },
+      defaultProvider: "ollama",
+      registry,
+      store,
+      systemPrompt: "test system prompt",
+    });
+
+    for await (const event of harness.run(TICKET)) {
+      if (event.type === "terminal") break;
+    }
+
+    const run = [...store.runs.values()][0] as Record<string, number | string>;
+    expect(run.terminalState).toBe("completed");
+    expect(run.totalInputTokens).toBeGreaterThan(0);
+    expect(run.totalOutputTokens).toBeGreaterThan(0);
+  });
+});

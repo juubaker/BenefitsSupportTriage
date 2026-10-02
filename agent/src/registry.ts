@@ -46,6 +46,15 @@ function isTransient(err: unknown): boolean {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Thrown by a handler when the model's arguments are wrong in a way it can fix
+ * (a citation it never retrieved, say). Surfaced as a validation failure so the
+ * loop hands it back once for self-correction instead of aborting the run.
+ */
+export class ToolValidationError extends Error {
+  readonly isToolValidation = true;
+}
+
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
   private wrapper?: ExecuteWrapper;
@@ -121,6 +130,9 @@ export class ToolRegistry {
         const output = await def.handler(parsed.data, ctx);
         return { ok: true, name, output, validatedArgs: parsed.data };
       } catch (err) {
+        if (err instanceof ToolValidationError) {
+          return { ok: false, name, kind: "validation", error: err.message };
+        }
         if (attempt === 0 && isTransient(err) && !ctx.signal?.aborted) {
           await sleep(250 * 2 ** attempt);
           continue;

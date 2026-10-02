@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ToolValidationError } from "./registry.js";
 import { ToolRegistry } from "./registry.js";
 
 /**
@@ -16,9 +17,33 @@ export interface TriageServices {
   escalate(ticketId: string, reason: string): Promise<void>;
 }
 
+/**
+ * The taxonomy the eval's golden cases are written against. Free-form strings
+ * let the model answer "benefits-enrollment" where the expected value is
+ * "enrollment", which fails outcome scoring on vocabulary alone; as an enum the
+ * valid values are part of the tool schema the model sees.
+ */
+export const TRIAGE_CATEGORIES = [
+  "enrollment",
+  "eligibility",
+  "plan_administration",
+  "medical",
+  "dental",
+  "vision",
+  "pharmacy",
+  "spending_accounts",
+  "disability",
+  "life_insurance",
+  "retirement",
+  "commuter",
+  "wellbeing",
+] as const;
+
+export const TRIAGE_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+
 export const triageResultSchema = z.object({
-  category: z.string().min(1),
-  priority: z.enum(["low", "medium", "high", "urgent"]),
+  category: z.enum(TRIAGE_CATEGORIES),
+  priority: z.enum(TRIAGE_PRIORITIES),
   summary: z.string().min(1),
   citations: z.array(z.string()).default([]),
   escalated: z.literal(false).default(false),
@@ -26,6 +51,17 @@ export const triageResultSchema = z.object({
 
 export function buildRegistry(services: TriageServices): ToolRegistry {
   const registry = new ToolRegistry();
+
+  // Ids this run actually retrieved, per run. The prompt tells the model to
+  // cite only these; this enforces it at the boundary, so a fabricated
+  // citation comes back as a correctable error instead of being stored and
+  // caught later by an eval metric (or not at all).
+  const observed = new Map<string, Set<string>>();
+  const note = (runId: string, ids: string[]) => {
+    const seen = observed.get(runId) ?? new Set<string>();
+    for (const id of ids) seen.add(id);
+    observed.set(runId, seen);
+  };
 
   registry.register({
     name: "search_policies",
@@ -35,8 +71,9 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       query: z.string().min(3),
       k: z.number().int().min(1).max(10).default(5),
     }),
-    handler: async ({ query, k }) => {
+    handler: async ({ query, k }, ctx) => {
       const rows = await services.searchPolicies(query, k);
+      note(ctx.runId, rows.map((r) => r.chunkId));
       return {
         data: rows,
         // The ids belong in the summary: agent_steps persists only this string,
@@ -57,8 +94,9 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       description: z.string().min(3),
       k: z.number().int().min(1).max(10).default(3),
     }),
-    handler: async ({ description, k }) => {
+    handler: async ({ description, k }, ctx) => {
       const rows = await services.findSimilarTickets(description, k);
+      note(ctx.runId, rows.map((r) => r.ticketId));
       return {
         data: rows,
         summary: `find_similar_tickets -> ${rows.length} matches [${rows
@@ -74,7 +112,18 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       "TERMINAL. Submit the final triage. Call exactly once, after gathering sufficient evidence. citations must only contain chunk/ticket ids returned by earlier tool calls.",
     schema: triageResultSchema,
     terminal: true,
-    handler: async (input) => {
+    handler: async (input, ctx) => {
+      const seen = observed.get(ctx.runId) ?? new Set<string>();
+      const unseen = (input.citations ?? []).filter((c) => !seen.has(c));
+      if (unseen.length > 0) {
+        observed.delete(ctx.runId);
+        throw new ToolValidationError(
+          `Citations not returned by any earlier tool call in this run: ${unseen.join(", ")}. ` +
+            `Cite only ids from your tool results${seen.size ? ` (available: ${[...seen].join(", ")})` : ""}, ` +
+            `or call the tool again with the unsupported citations removed.`,
+        );
+      }
+      observed.delete(ctx.runId);
       await services.saveTriage(input);
       return {
         data: { saved: true },
@@ -94,7 +143,8 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       reason: z.string().min(10),
     }),
     terminal: true,
-    handler: async ({ ticketId, reason }) => {
+    handler: async ({ ticketId, reason }, ctx) => {
+      observed.delete(ctx.runId);
       await services.escalate(ticketId, reason);
       return { data: { escalated: true }, summary: `escalated: ${reason.slice(0, 60)}` };
     },
