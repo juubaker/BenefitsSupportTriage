@@ -39,6 +39,21 @@ export const TRIAGE_CATEGORIES = [
   "wellbeing",
 ] as const;
 
+/**
+ * The finalize() path asks for free JSON with tools disabled, so nothing checks
+ * it against the tool schema. This is that schema with the coercions a
+ * best-effort answer needs: "false" as a string, stray whitespace and casing on
+ * the enums. A result that still fails is not a decision worth recording.
+ */
+export const finalResultSchema = z.preprocess((raw) => {
+  if (raw === null || typeof raw !== "object") return raw;
+  const v = { ...(raw as Record<string, unknown>) };
+  if (typeof v.escalated === "string") v.escalated = v.escalated.trim().toLowerCase() === "true";
+  if (typeof v.category === "string") v.category = v.category.trim().toLowerCase();
+  if (typeof v.priority === "string") v.priority = v.priority.trim().toLowerCase();
+  return v;
+}, z.lazy(() => triageResultSchema));
+
 export const TRIAGE_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 
 export const triageResultSchema = z.object({
