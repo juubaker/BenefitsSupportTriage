@@ -196,3 +196,49 @@ describe("run totals when the consumer stops at terminal", () => {
     expect(run.totalOutputTokens).toBeGreaterThan(0);
   });
 });
+
+describe("validation retry budget", () => {
+  it("gives each step its own correction, so an early slip doesn't doom a later one", async () => {
+    // The live run spent its single retry on a bad `k` at step 1, leaving none
+    // for a different tool's wrong argument name at step 3, which ended the
+    // run in tool_failure.
+    const { terminal, calls } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: "oops" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "Searching again.", toolCalls: [{ name: "search_policies", input: { q: "wrong field name" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "qualifying life event", k: 5 } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(calls.map((c) => c.name).filter((n) => n === "search_policies")).toHaveLength(2);
+  });
+
+  it("still gives up when the same step fails validation twice", async () => {
+    const { terminal } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { q: "wrong" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "ok now", k: 5 } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "completed" });
+  });
+
+  it("caps corrections across the run so a confused model can't burn every step", async () => {
+    // Distinct wrong arguments each time, so this exercises the validation cap
+    // rather than the repeated-call loop guard (which fires on identical calls).
+    const guessing = (field: string) => ({
+      text: "Guessing.",
+      toolCalls: [{ name: "search_policies", input: { [field]: "spouse coverage" } }],
+    });
+    const { terminal } = await collect([
+      guessing("q"),
+      guessing("search"),
+      guessing("text"),
+      guessing("term"),
+      { text: JSON.stringify(FINAL) }, // finalize()'s tools-disabled best-effort call
+    ]);
+
+    expect(terminal).toMatchObject({ state: "tool_failure" });
+  });
+});

@@ -32,6 +32,7 @@ export interface LoopOutcome {
 }
 
 const DEFAULT_MAX_STEPS = 8;
+const MAX_VALIDATION_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS = 90_000;
 const TEMPERATURE = 0.2;
 /** Deterministic key for loop detection: same tool + semantically identical args. */
@@ -73,7 +74,13 @@ export async function* runLoop(
   const callCounts = new Map<string, number>(); // loop-detection guard
   const totals = { inputTokens: 0, outputTokens: 0 };
   let bareEndTurns = 0;
-  let validationRetries = 0;
+  // One self-correction per step, not one per run: a wrong argument at step 1
+  // should not leave a different tool at step 3 with no slack. A step that
+  // fails validation twice is still unrecoverable, and MAX_VALIDATION_RETRIES
+  // caps the run so a model that keeps guessing argument names cannot burn
+  // every step one correction at a time.
+  let validationRetriesThisStep = 0;
+  let validationRetriesTotal = 0;
 
   const finalize = async function* (
     reason: Exclude<TerminalState, "completed" | "aborted">,
@@ -122,6 +129,7 @@ export async function* runLoop(
     }
 
     yield { type: "step_started", step };
+    validationRetriesThisStep = 0;
 
     // Assemble context via the budgeter (spec §6 assembly order).
     const assembly = await budgeter.assemble(messages, resultSummaries);
@@ -262,8 +270,11 @@ export async function* runLoop(
         yield { type: "tool_result", step, name: call.name, summary: res.error, isError: true };
         if (res.kind === "validation") {
           // Surface once for self-correction; second validation failure is unrecoverable.
-          validationRetries++;
-          if (validationRetries > 1) unrecoverable = true;
+          validationRetriesThisStep++;
+          validationRetriesTotal++;
+          if (validationRetriesThisStep > 1 || validationRetriesTotal > MAX_VALIDATION_RETRIES) {
+            unrecoverable = true;
+          }
           resultBlocks.push({
             type: "tool_result",
             toolUseId: call.id,
