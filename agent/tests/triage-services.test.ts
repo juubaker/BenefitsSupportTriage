@@ -163,3 +163,73 @@ describe("createOllamaEmbedder", () => {
     await expect(embedder("hello")).rejects.toThrow(/Ollama embed failed \(404\)/);
   });
 });
+
+describe("buildRegistry citation enforcement", () => {
+  const services = (hits: string[] = ["chunk-qle-12"]) => ({
+    searchPolicies: async () => hits.map((id, i) => ({ chunkId: id, text: "…", score: 0.8 - i / 100 })),
+    findSimilarTickets: async () => [{ ticketId: "R-2201", resolution: "…", score: 0.77 }],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  });
+  const ctx = { runId: "run-1", step: 1 };
+  const decision = (citations: string[]) => ({
+    category: "enrollment",
+    priority: "high",
+    summary: "QLE special enrollment.",
+    citations,
+    escalated: false,
+  });
+
+  it("rejects a citation no tool call in this run returned", async () => {
+    const registry = buildRegistry(services());
+    await registry.execute("search_policies", { query: "spouse lost coverage", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision(["chunk-4", "chunk-qle-12"]), ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+    expect(res.error).toContain("chunk-4");
+    expect(res.error).not.toContain("chunk-qle-12, chunk-4");
+  });
+
+  it("accepts citations that were retrieved, across both corpora", async () => {
+    const registry = buildRegistry(services(["chunk-qle-12", "chunk-cobra-04"]));
+    await registry.execute("search_policies", { query: "spouse lost coverage", k: 5 }, ctx);
+    await registry.execute("find_similar_tickets", { description: "spouse laid off", k: 3 }, ctx);
+
+    const res = await registry.execute(
+      "triage_ticket",
+      decision(["chunk-qle-12", "chunk-cobra-04", "R-2201"]),
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("does not let one run's retrieved ids vouch for another run's citations", async () => {
+    const registry = buildRegistry(services());
+    await registry.execute("search_policies", { query: "spouse lost coverage", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision(["chunk-qle-12"]), {
+      runId: "run-2",
+      step: 1,
+    });
+
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects a category outside the taxonomy before the handler runs", async () => {
+    const registry = buildRegistry(services());
+
+    const res = await registry.execute(
+      "triage_ticket",
+      { ...decision([]), category: "benefits-enrollment" },
+      ctx,
+    );
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+  });
+});

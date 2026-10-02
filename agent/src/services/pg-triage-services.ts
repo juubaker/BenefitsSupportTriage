@@ -51,7 +51,10 @@ export interface PgTriageServicesFactory {
   forTicket(ctx: TicketContext): TriageServices;
 }
 
-const DEFAULT_MIN_SIMILARITY = 0.45;
+// Chosen from the retrieval sweep in evals/retrieval_eval.py: 0.65 is the
+// balanced peak on this corpus (recall 0.77, and every out-of-scope case
+// correctly returns nothing). 0.7+ discards a third of real evidence.
+const DEFAULT_MIN_SIMILARITY = 0.65;
 const DEFAULT_MAX_K = 10;
 
 /** Stable, model-visible id for a policy chunk. Citations are checked against these. */
