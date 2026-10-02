@@ -11,7 +11,8 @@ const bodySchema = z.object({
 
 /**
  * POST /api/triage — runs the agent and streams AgentEvents over SSE.
- * Client disconnect aborts the run via AbortController -> terminal "aborted".
+ * Client disconnect (response close before a clean end) aborts the run via
+ * AbortController -> terminal "aborted".
  */
 export type HarnessSource = AgentHarness | ((ticketId: string) => AgentHarness);
 
@@ -39,7 +40,14 @@ export function triageRouter(source: HarnessSource): Router {
     res.flushHeaders?.();
 
     const abort = new AbortController();
-    req.on("close", () => abort.abort());
+    // Abort on the RESPONSE closing, not the request. `req` is the body
+    // stream: once the JSON body parser has consumed it, req emits "close"
+    // immediately, which aborted every run milliseconds after it started.
+    // res "close" means the connection actually went away, and the
+    // writableEnded guard keeps a clean finish from counting as a disconnect.
+    res.on("close", () => {
+      if (!res.writableEnded) abort.abort();
+    });
     const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), 15_000);
 
     const send = (event: string, data: unknown) => {
