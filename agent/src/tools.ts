@@ -39,7 +39,12 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       const rows = await services.searchPolicies(query, k);
       return {
         data: rows,
-        summary: `search_policies("${query}") -> ${rows.length} chunks, top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
+        // The ids belong in the summary: agent_steps persists only this string,
+        // and the eval's grounding metric recovers what the run actually saw
+        // from it. Without them every citation looks hallucinated.
+        summary: `search_policies("${query}") -> ${rows.length} chunks [${rows
+          .map((r) => r.chunkId)
+          .join(", ")}], top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
       };
     },
   });
@@ -56,7 +61,9 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       const rows = await services.findSimilarTickets(description, k);
       return {
         data: rows,
-        summary: `find_similar_tickets -> ${rows.length} matches, top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
+        summary: `find_similar_tickets -> ${rows.length} matches [${rows
+          .map((r) => r.ticketId)
+          .join(", ")}], top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
       };
     },
   });
@@ -69,7 +76,12 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
     terminal: true,
     handler: async (input) => {
       await services.saveTriage(input);
-      return { data: { saved: true }, summary: `triage saved: ${input.category}/${input.priority}` };
+      return {
+        data: { saved: true },
+        summary: `triage saved: ${input.category}/${input.priority}, citations [${(
+          input.citations ?? []
+        ).join(", ")}]`,
+      };
     },
   });
 

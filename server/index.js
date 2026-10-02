@@ -24,7 +24,26 @@ if (usesAnthropic && !process.env.ANTHROPIC_API_KEY) {
   console.warn('   Set LLM_PROVIDER=ollama for local-only mode, or fill in .env\n');
 }
 
-const app = createApp({ providers });
+// v2 agent: mounted when its build is present and a database is configured.
+// A missing build or connection is not fatal — the v1 API still serves, and
+// POST /api/triage answers 503 explaining how to enable it.
+let agentRouter = null;
+let agentRuntime = null;
+if (process.env.AGENT_ENABLED !== 'false') {
+  try {
+    const { createAgentRuntime } = await import('../agent/dist/src/create-harness.js');
+    const { triageRouter } = await import('../agent/dist/src/routes/triage.js');
+    agentRuntime = createAgentRuntime();
+    agentRouter = triageRouter((ticketId) => agentRuntime.harnessFor(ticketId));
+  } catch (e) {
+    const hint = e.code === 'ERR_MODULE_NOT_FOUND'
+      ? 'run `npm run agent:build` to enable POST /api/triage'
+      : e.message;
+    console.warn(`\n⚠  Agent not mounted: ${hint}\n`);
+  }
+}
+
+const app = createApp({ providers, agentRouter });
 
 app.listen(PORT, () => {
   console.log(`\n▸ Triage API listening on http://localhost:${PORT}`);
@@ -33,5 +52,17 @@ app.listen(PORT, () => {
   if (providers.triage === providers.draft) {
     console.log(`  (single adapter shared by both routes)`);
   }
+  console.log(
+    agentRuntime
+      ? `  agent   →  ${agentRuntime.defaultProvider} (POST /api/triage)`
+      : `  agent   →  not mounted`,
+  );
   console.log(`  health  →  http://localhost:${PORT}/api/health\n`);
 });
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    agentRuntime?.close().finally(() => process.exit(0));
+    if (!agentRuntime) process.exit(0);
+  });
+}

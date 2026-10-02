@@ -10,6 +10,7 @@ import pytest
 from cases import Bucket, Suite, load_cases, load_suite, SMOKE_IDS
 from trajectory_judge import JudgeConfig, reasoning_quality
 from metrics import RunData, score_deterministic
+from trajectory_judge import _extract_ids
 from run import build_scorecard, CaseScore
 
 
@@ -26,6 +27,9 @@ def good_run(**over) -> RunData:
         submitted_citations=["chunk-pcp-01"],
         observed_ids={"chunk-pcp-01"},
         escalated=False,
+        # matches base-01, the case the shared fixture is scored against
+        submitted_category="plan_administration",
+        submitted_priority="low",
     )
     base.update(over)
     return RunData(**base)
@@ -147,3 +151,104 @@ def test_scorecard_aggregates_by_metric_and_bucket():
     assert card["by_metric"]["loop_discipline"]["rate"] == 0.5
     assert card["by_bucket"]["out_of_scope"]["rate"] == 0.0
     assert card["failures"] == [{"case_id": "oos-01", "failed": ["loop_discipline"]}]
+
+
+# ---------------- outcome metrics ----------------
+
+def _metric(results, name):
+    return next(r for r in results if r.metric == name)
+
+
+def test_wrong_category_fails_outcome_even_with_a_clean_trajectory():
+    case = case_by_id("base-01")
+    run = good_run(
+        submitted_category="billing",
+        submitted_citations=list(case.outcome.grounding_ids) or ["chunk-pcp-01"],
+        observed_ids=set(case.outcome.grounding_ids) | {"chunk-pcp-01"},
+    )
+    results = score_deterministic(case, run)
+    outcome = _metric(results, "outcome_correctness")
+    assert not outcome.passed
+    assert "billing" in outcome.detail
+    # the trajectory itself was fine — this is the gap the metric closes
+    assert _metric(results, "loop_discipline").passed
+    assert _metric(results, "retrieval_grounding").passed
+
+
+def test_outcome_comparison_ignores_case_and_padding():
+    case = case_by_id("base-01")
+    expected = case.outcome
+    run = good_run(
+        submitted_category=(expected.category or "plan_administration").upper(),
+        submitted_priority=(expected.priority or "low").title() + " ",
+        submitted_citations=list(expected.grounding_ids) or ["chunk-pcp-01"],
+        observed_ids=set(expected.grounding_ids) | {"chunk-pcp-01"},
+    )
+    assert _metric(score_deterministic(case, run), "outcome_correctness").passed
+
+
+def test_escalation_cases_skip_outcome_correctness():
+    case = case_by_id("oos-01")
+    run = good_run(
+        steps=[["escalate_to_human"]],
+        step_count=1,
+        escalated=True,
+        submitted_citations=[],
+        observed_ids=set(),
+        submitted_category=None,
+        submitted_priority=None,
+    )
+    result = _metric(score_deterministic(case, run), "outcome_correctness")
+    assert result.passed and "n/a" in result.detail
+
+
+def test_multihop_citing_only_half_the_evidence_fails_recall():
+    case = case_by_id("multihop-01")
+    expected = case.outcome.grounding_ids
+    assert len(expected) >= 2, "this test needs a case with multiple grounding ids"
+    run = good_run(
+        steps=[["search_policies"], ["search_policies"], ["triage_ticket"]],
+        step_count=3,
+        submitted_citations=[expected[0]],
+        observed_ids=set(expected),
+        submitted_category=case.outcome.category,
+        submitted_priority=case.outcome.priority,
+    )
+    results = score_deterministic(case, run)
+    recall = _metric(results, "grounding_recall")
+    assert not recall.passed
+    assert expected[1] in recall.detail
+    # citing a subset is not hallucinating — the inverse metric still passes
+    assert _metric(results, "retrieval_grounding").passed
+
+
+def test_citing_every_expected_chunk_passes_recall():
+    case = case_by_id("multihop-01")
+    expected = list(case.outcome.grounding_ids)
+    run = good_run(
+        steps=[["search_policies"], ["search_policies"], ["triage_ticket"]],
+        step_count=3,
+        submitted_citations=expected,
+        observed_ids=set(expected),
+        submitted_category=case.outcome.category,
+        submitted_priority=case.outcome.priority,
+    )
+    assert _metric(score_deterministic(case, run), "grounding_recall").passed
+
+
+# ---------------- id extraction from real tool summaries ----------------
+
+def test_ids_are_recovered_from_the_summaries_the_tools_actually_write():
+    policy = (
+        'search_policies("spouse lost coverage") -> 2 chunks '
+        "[chunk-qle-12, chunk-cobra-04], top score 0.82"
+    )
+    tickets = "find_similar_tickets -> 1 matches [R-2201], top score 0.77"
+    assert _extract_ids(policy) == {"chunk-qle-12", "chunk-cobra-04"}
+    assert _extract_ids(tickets) == {"R-2201"}
+
+
+def test_serial_id_fallback_is_recovered_too():
+    assert _extract_ids("search_policies(\"q\") -> 1 chunks [chunk-312], top score 0.6") == {
+        "chunk-312"
+    }

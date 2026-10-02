@@ -134,6 +134,19 @@ Resources: `policy://chunk/{id}`, `ticket://{id}`, `ticket://{id}/resolution`,
 
 **Agent loop**
 
+The agent serves `POST /api/triage` (SSE) through the Express API once its
+build is present; the reviewer UI's agent panel calls it. Build it, then start
+the server as usual:
+
+```bash
+npm run agent:install && npm run agent:build
+npm run dev                             # agent mounted; AGENT_ENABLED=false to skip
+```
+
+Without the build, that route answers 503 explaining how to enable it, and the
+rest of the API is unaffected. To run a single ticket through the loop from the
+command line instead:
+
 ```bash
 cd agent && npm ci --legacy-peer-deps
 npm run smoke -- --fake                 # scripted provider, no model: checks loop mechanics
@@ -166,8 +179,8 @@ python -m pytest test_eval.py -q            # harness self-tests: metrics, loade
 ```
 
 The golden set has 42 cases across base, multi-hop, adversarial, out-of-scope,
-budget and graph buckets, scored by seven deterministic trajectory metrics and
-a judge-model pass. The suite runner (`python -m run --suite smoke|nightly`)
+budget and graph buckets, scored by nine deterministic metrics (seven on the
+trajectory, two on the decision itself) and a judge-model pass. The suite runner (`python -m run --suite smoke|nightly`)
 needs a `wiring.py` (copy `wiring.example.py`) and an HTTP endpoint that runs
 the agent, which is not mounted yet. See [evals/README.md](evals/README.md) and
 [evals/V2_CONSOLIDATION.md](evals/V2_CONSOLIDATION.md).
@@ -191,9 +204,9 @@ In place: the v1 reviewer pipeline, the MCP server, and the v2 agent package
 (harness, budgeter, tracing, graph layer) with its retrieval tools on the live
 pgvector corpora, plus the eval harness and golden set. In progress:
 
-- **Mounting the agent.** The agent's `/api/triage` route (SSE) is not yet
-  mounted by the Express API, so the reviewer UI and the eval runner still
-  can't call it. This also unblocks the CI eval gates.
+- **CI eval gates.** The agent now serves `/api/triage`, so the eval runner has
+  an endpoint to call; the smoke and nightly jobs in the workflow are still
+  commented out pending a first real run.
 - **Consolidating retrieval.** Embedding and vector search still exist in
   `server/rag`, `rag/lib` and `src/` alongside `agent/src/services`, which will
   replace them.
