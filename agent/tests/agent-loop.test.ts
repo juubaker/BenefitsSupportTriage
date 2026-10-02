@@ -242,3 +242,58 @@ describe("validation retry budget", () => {
     expect(terminal).toMatchObject({ state: "tool_failure" });
   });
 });
+
+describe("narrated tool calls and finalize validation", () => {
+  it("names the narrated call in the nudge, and the model can recover from it", async () => {
+    // llama3.1 wrote "triage_ticket()" as prose instead of emitting a call.
+    const { terminal, calls, provider } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "Evidence is sufficient.\n\ntriage_ticket()" },
+      { text: "Calling it properly.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    const sent = JSON.stringify(provider.requests);
+    expect(sent).toContain("You wrote");
+    expect(sent).toContain("triage_ticket()");
+    expect(sent).toContain("That is not a tool call and nothing ran");
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(calls.map((c) => c.name)).toEqual(["search_policies", "triage_ticket"]);
+  });
+
+  it("falls back to the generic nudge when the model just wrote prose", async () => {
+    const { provider } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "The spouse may enroll within 31 days." },
+      { text: "Right.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    expect(JSON.stringify(provider.requests)).toContain("Do not answer in prose");
+  });
+
+  it("coerces the loose JSON a finalized run returns", async () => {
+    // The live run finalized with escalated as the string "false".
+    const { terminal } = await collect([
+      { text: "Prose." },
+      { text: "More prose." },
+      { text: JSON.stringify({ ...FINAL, escalated: "false", category: " Enrollment " }) },
+    ]);
+
+    expect(terminal).toMatchObject({
+      state: "no_terminal_tool",
+      result: { escalated: false, category: "enrollment" },
+    });
+  });
+
+  it("discards a finalized result whose category is outside the taxonomy", async () => {
+    // The live run finalized with category "benefits", which does not exist.
+    const { terminal, events } = await collect([
+      { text: "Prose." },
+      { text: "More prose." },
+      { text: JSON.stringify({ ...FINAL, category: "benefits" }) },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "no_terminal_tool" });
+    expect((terminal as { result?: unknown }).result).toBeUndefined();
+    expect(events.some((e) => e.type === "loop_guard" && e.action === "final_rejected")).toBe(true);
+  });
+});
