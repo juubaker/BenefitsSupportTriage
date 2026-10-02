@@ -24,6 +24,7 @@ import { AgentTracing, initTracing } from "./tracing.js";
 import { buildRegistry, SYSTEM_PROMPT } from "./tools.js";
 import { createOllamaEmbedder } from "./services/embeddings.js";
 import { createPgTriageServices, type Queryable } from "./services/pg-triage-services.js";
+import { loadPricing } from "./pricing.js";
 
 export interface AgentRuntime {
   /** A harness bound to one ticket. Build one per request. */
@@ -41,7 +42,10 @@ export function createAgentRuntime(env: NodeJS.ProcessEnv = process.env): AgentR
   }
 
   const pool = new Pool({ connectionString });
-  const store = new DrizzleRunStore(drizzle(pool));
+  // Without this, every run and every ledger row records a cost of zero,
+  // which is indistinguishable from a genuinely free local run.
+  const pricing = loadPricing(env);
+  const store = new DrizzleRunStore(drizzle(pool), pricing);
   const { providers, defaultProvider } = buildProviders(env);
 
   const services = createPgTriageServices({
@@ -67,6 +71,7 @@ export function createAgentRuntime(env: NodeJS.ProcessEnv = process.env): AgentR
         registry: buildRegistry(services.forTicket({ ticketId })),
         store,
         systemPrompt: SYSTEM_PROMPT,
+        pricing,
         tracing,
       });
     },

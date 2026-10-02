@@ -322,3 +322,66 @@ describe("narrated tool calls and finalize validation", () => {
     expect(events.some((e) => e.type === "loop_guard" && e.action === "final_rejected")).toBe(true);
   });
 });
+
+describe("cost accounting", () => {
+  // FakeProvider reports model "fake-model"; price it like a hosted model in
+  // one case and like local inference in the other.
+  const PAID = { "fake-model": { inputPerMTok: 3, outputPerMTok: 15 } };
+  const FREE = { "fake-model": { inputPerMTok: 0, outputPerMTok: 0 } };
+
+  async function runWith(
+    providers: Record<string, FakeProvider>,
+    defaultProvider: string,
+    pricing: Record<string, { inputPerMTok: number; outputPerMTok: number }>,
+  ) {
+    const { registry } = buildTestRegistry();
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: providers as never,
+      defaultProvider: defaultProvider as never,
+      registry,
+      store,
+      systemPrompt: "test system prompt",
+      pricing,
+    });
+    for await (const event of harness.run(TICKET)) {
+      if (event.type === "terminal") break;
+    }
+    return [...store.runs.values()][0] as Record<string, number>;
+  }
+
+  it("prices a priced model instead of recording zero", async () => {
+    const run = await runWith(
+      {
+        anthropic: new FakeProvider(
+          [
+            { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+            { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+          ],
+          "anthropic",
+        ),
+      },
+      "anthropic",
+      PAID,
+    );
+
+    expect(run.totalInputTokens).toBeGreaterThan(0);
+    expect(run.totalCostUsd).toBeGreaterThan(0);
+  });
+
+  it("records zero for a local model, which genuinely costs nothing", async () => {
+    const run = await runWith(
+      {
+        ollama: new FakeProvider([
+          { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+          { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+        ]),
+      },
+      "ollama",
+      FREE,
+    );
+
+    expect(run.totalInputTokens).toBeGreaterThan(0);
+    expect(run.totalCostUsd).toBe(0);
+  });
+});
