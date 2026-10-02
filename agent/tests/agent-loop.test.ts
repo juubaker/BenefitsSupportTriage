@@ -167,6 +167,31 @@ describe("agent loop", () => {
 });
 
 describe("run totals when the consumer stops at terminal", () => {
+  it("records the step count too, which step_efficiency scores against", async () => {
+    const { registry } = buildTestRegistry();
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: {
+        ollama: new FakeProvider([
+          { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+          { text: "Searching again.", toolCalls: [{ name: "search_policies", input: { query: "qualifying life event", k: 5 } }] },
+          { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+        ]),
+      },
+      defaultProvider: "ollama",
+      registry,
+      store,
+      systemPrompt: "test system prompt",
+    });
+
+    for await (const event of harness.run(TICKET)) {
+      if (event.type === "terminal") break;
+    }
+
+    const run = [...store.runs.values()][0] as Record<string, unknown>;
+    expect(run.stepCount).toBe(3);
+  });
+
   it("records token usage even if the generator is disposed early", async () => {
     // The SSE route breaks out of the for-await on the terminal event, which
     // disposes the loop generator before its return value — the authoritative

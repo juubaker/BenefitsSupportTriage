@@ -285,3 +285,62 @@ describe("tool schemas against what smaller models actually send", () => {
     expect(() => buildRegistry(services).specs()).not.toThrow();
   });
 });
+
+describe("triage_ticket accepts what the model sent at step 4 of the live run", () => {
+  const services = {
+    searchPolicies: async () => [{ chunkId: "chunk-qle-12", text: "…", score: 0.69 }],
+    findSimilarTickets: async () => [],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const ctx = { runId: "run-1", step: 1 };
+  const base = {
+    category: "eligibility",
+    priority: "medium",
+    summary: "Spouse can be added mid-year after job loss.",
+  };
+
+  async function submit(extra: Record<string, unknown>) {
+    const registry = buildRegistry(services);
+    await registry.execute("search_policies", { query: "spouse job loss", k: 5 }, ctx);
+    return registry.execute("triage_ticket", { ...base, ...extra }, ctx);
+  }
+
+  it('accepts citations as a JSON-encoded array string', async () => {
+    const res = await submit({ citations: '["chunk-qle-12"]', escalated: false });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.validatedArgs).toMatchObject({ citations: ["chunk-qle-12"] });
+  });
+
+  it('accepts escalated as the string "False"', async () => {
+    const res = await submit({ citations: ["chunk-qle-12"], escalated: "False" });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.validatedArgs).toMatchObject({ escalated: false });
+  });
+
+  it("accepts a comma-separated citation list", async () => {
+    const res = await submit({ citations: "chunk-qle-12", escalated: false });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.validatedArgs).toMatchObject({ citations: ["chunk-qle-12"] });
+  });
+
+  it("still enforces grounding on coerced citations", async () => {
+    const res = await submit({ citations: '["chunk-4"]', escalated: false });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toContain("chunk-4");
+  });
+
+  it('still rejects escalated: "true" on the non-escalation tool', async () => {
+    const res = await submit({ citations: ["chunk-qle-12"], escalated: "true" });
+
+    expect(res.ok).toBe(false);
+  });
+});
