@@ -40,6 +40,54 @@ export const TRIAGE_CATEGORIES = [
 ] as const;
 
 /**
+ * What each category means, sent to the model as part of the tool schema.
+ *
+ * Thirteen bare words leave the boundaries to guesswork, and the model
+ * guessed differently from the golden set on every run — "can I add my spouse
+ * mid-year" came back as eligibility where the taxonomy means enrollment. The
+ * distinctions a human reviewer would make have to be written down.
+ *
+ * Typed against the tuple, so adding a category without defining it is a
+ * compile error rather than a silent gap.
+ */
+export const CATEGORY_GUIDANCE: Record<(typeof TRIAGE_CATEGORIES)[number], string> = {
+  enrollment:
+    "Adding, dropping, or changing coverage: qualifying life events, open enrollment elections, adding a newborn or spouse, new-hire elections, COBRA continuation.",
+  eligibility:
+    "Whether a person or dependent QUALIFIES for coverage at all: dependent age limits, hours-worked thresholds, HSA eligibility, coverage through two employers.",
+  plan_administration:
+    "Operating coverage the employee already has: changing a primary care physician, ID cards, reinstating benefits after leave, what documentation a change requires.",
+  medical: "What the medical plan itself covers: network rules, out-of-network costs, maternity and delivery coverage.",
+  dental: "Dental plan coverage, limits, and maximums.",
+  vision: "Vision plan coverage and frequency limits.",
+  pharmacy: "Prescription drug coverage: tiers, copays, mail order, specialty drugs.",
+  spending_accounts: "HSA, health care FSA, and dependent care FSA mechanics: contributions, limits, rollover, eligible expenses.",
+  disability: "Short- and long-term disability and income replacement during leave.",
+  life_insurance: "Basic and supplemental life insurance coverage and elections.",
+  retirement: "401(k) participation, contributions, company match, and vesting.",
+  commuter: "Transit and parking pre-tax benefits.",
+  wellbeing: "Employee assistance program, counseling, and wellness benefits.",
+};
+
+/**
+ * The two pairs the model confuses, stated as decisions rather than
+ * definitions. Enrollment-vs-eligibility is the one that cost four cases.
+ */
+const CATEGORY_BOUNDARIES = [
+  "enrollment vs eligibility: enrollment is an ACTION on coverage (add, drop, switch); eligibility is whether someone QUALIFIES. \"Can I add my spouse mid-year?\" is enrollment. \"Is my 26-year-old still covered?\" is eligibility.",
+  "enrollment vs plan_administration: plan_administration is a change WITHIN coverage already held (changing a PCP), not a change TO what is covered.",
+  "Prefer the specific plan category (dental, vision, pharmacy) when the question is only about what that plan covers; medical is for the medical plan.",
+].join(" ");
+
+/** When a ticket is urgent, stated as what the employee stands to lose. */
+const PRIORITY_GUIDANCE = [
+  "low: a factual lookup about how a benefit works, with no action for the employee and no deadline running (a copay amount, an annual maximum, a match formula).",
+  "medium: a question that affects a decision or involves the employee's own situation, but with no deadline running (comparing plans, out-of-network costs, a disability waiting period).",
+  "high: a deadline is running or coverage is at risk — a qualifying life event and its 31-day window, a dependent aging off, job loss, a newborn, anything where delay costs the employee an option.",
+  "urgent: rare; active loss of coverage or a missed deadline that needs same-day intervention.",
+].join(" ");
+
+/**
  * The finalize() path asks for free JSON with tools disabled, so nothing checks
  * it against the tool schema. This is that schema with the coercions a
  * best-effort answer needs: "false" as a string, stray whitespace and casing on
@@ -74,8 +122,15 @@ const notEscalated = z.preprocess(
 );
 
 export const triageResultSchema = z.object({
-  category: z.enum(TRIAGE_CATEGORIES),
-  priority: z.enum(TRIAGE_PRIORITIES),
+  category: z
+    .enum(TRIAGE_CATEGORIES)
+    .describe(
+      "The benefits area this ticket belongs to. " +
+        TRIAGE_CATEGORIES.map((c) => `${c} — ${CATEGORY_GUIDANCE[c]}`).join(" ") +
+        " " +
+        CATEGORY_BOUNDARIES,
+    ),
+  priority: z.enum(TRIAGE_PRIORITIES).describe(`How time-critical this ticket is. ${PRIORITY_GUIDANCE}`),
   summary: z.string().min(1),
   citations: citationList.default([]),
   escalated: notEscalated.default(false),

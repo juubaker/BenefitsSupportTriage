@@ -5,7 +5,12 @@ import {
   type QueryResult,
 } from "../src/services/pg-triage-services.js";
 import { createOllamaEmbedder, toVectorLiteral } from "../src/services/embeddings.js";
-import { buildRegistry } from "../src/tools.js";
+import {
+  buildRegistry,
+  CATEGORY_GUIDANCE,
+  TRIAGE_CATEGORIES,
+  TRIAGE_PRIORITIES,
+} from "../src/tools.js";
 
 /** Records every statement and returns canned rows, so no Postgres is needed. */
 function fakeDb(rowsByCall: Array<Array<Record<string, unknown>>> = []): Queryable & {
@@ -342,5 +347,49 @@ describe("triage_ticket accepts what the model sent at step 4 of the live run", 
     const res = await submit({ citations: ["chunk-qle-12"], escalated: "true" });
 
     expect(res.ok).toBe(false);
+  });
+});
+
+describe("taxonomy guidance in the tool schema", () => {
+  const services = {
+    searchPolicies: async () => [],
+    findSimilarTickets: async () => [],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const spec = () =>
+    buildRegistry(services)
+      .specs()
+      .find((s) => s.name === "triage_ticket") as unknown as {
+      inputSchema: { properties: Record<string, { description?: string }> };
+    };
+
+  it("sends a definition for every category the enum accepts", () => {
+    const description = spec().inputSchema.properties.category.description ?? "";
+
+    for (const category of TRIAGE_CATEGORIES) {
+      expect(description).toContain(`${category} — `);
+    }
+  });
+
+  it("states the enrollment/eligibility boundary that the live runs got wrong", () => {
+    const description = spec().inputSchema.properties.category.description ?? "";
+
+    expect(description).toContain("add my spouse mid-year");
+    expect(description).toMatch(/enrollment is an ACTION/);
+    expect(description).toMatch(/eligibility is whether someone QUALIFIES/);
+  });
+
+  it("gives each priority level a rule rather than a bare word", () => {
+    const description = spec().inputSchema.properties.priority.description ?? "";
+
+    for (const level of TRIAGE_PRIORITIES) {
+      expect(description).toContain(`${level}:`);
+    }
+    expect(description).toContain("31-day window");
+  });
+
+  it("keeps the guidance and the enum in step", () => {
+    expect(Object.keys(CATEGORY_GUIDANCE).sort()).toEqual([...TRIAGE_CATEGORIES].sort());
   });
 });
