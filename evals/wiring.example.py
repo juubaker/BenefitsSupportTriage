@@ -11,7 +11,7 @@ import time
 import psycopg  # type: ignore
 import requests  # type: ignore
 
-from judge import default_judge_config
+from trajectory_judge import default_judge_config
 from run import RunnerDeps
 
 APP_URL = os.environ.get("AGENT_APP_URL", "http://localhost:3000")
