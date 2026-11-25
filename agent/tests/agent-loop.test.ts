@@ -175,7 +175,7 @@ describe("run totals when the consumer stops at terminal", () => {
         ]),
       },
       defaultProvider: "ollama",
-      registry,
+      registryFor: () => registry,
       store,
       systemPrompt: "test system prompt",
     });
@@ -202,7 +202,7 @@ describe("run totals when the consumer stops at terminal", () => {
         ]),
       },
       defaultProvider: "ollama",
-      registry,
+      registryFor: () => registry,
       store,
       systemPrompt: "test system prompt",
     });
@@ -335,7 +335,7 @@ describe("cost accounting", () => {
     const harness = new AgentHarness({
       providers: providers as never,
       defaultProvider: defaultProvider as never,
-      registry,
+      registryFor: () => registry,
       store,
       systemPrompt: "test system prompt",
       pricing,
@@ -435,7 +435,7 @@ describe("escalation after an ungrounded triage is refused", () => {
     const harness = new AgentHarness({
       providers: { ollama: new FakeProvider(turns) },
       defaultProvider: "ollama",
-      registry,
+      registryFor: () => registry,
       store,
       systemPrompt: SYSTEM_PROMPT,
     });

@@ -139,10 +139,17 @@ export const triageResultSchema = z.object({
 export function buildRegistry(services: TriageServices): ToolRegistry {
   const registry = new ToolRegistry();
 
-  // Ids this run actually retrieved, per run. The prompt tells the model to
-  // cite only these; this enforces it at the boundary, so a fabricated
-  // citation comes back as a correctable error instead of being stored and
-  // caught later by an eval metric (or not at all).
+  // Ids this run actually retrieved. The prompt tells the model to cite only
+  // these; this enforces it at the boundary, so a fabricated citation comes
+  // back as a correctable error instead of being stored and caught later by
+  // an eval metric (or not at all).
+  //
+  // Keyed by runId even though the harness now calls registryFor per run, so
+  // in practice there is one entry. That is deliberate: it is the only thing
+  // stopping one run's retrieved ids from vouching for another's citations if
+  // a caller ever shares or caches a registry across runs. Flattening it to a
+  // plain Set would compile, pass, and quietly remove that guarantee — there
+  // is a test for it.
   const observed = new Map<string, Set<string>>();
   const note = (runId: string, ids: string[]) => {
     const seen = observed.get(runId) ?? new Set<string>();

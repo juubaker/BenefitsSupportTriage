@@ -72,12 +72,14 @@ async function serve(opts: { delayMs?: number } = {}) {
     : scripted;
   const app = express();
   app.use(express.json());
+  // One harness for the app, as createAgentRuntime now builds it: the
+  // registry is created per run inside the harness.
   app.use(
-    triageRouter(() =>
+    triageRouter(
       new AgentHarness({
         providers: { ollama: provider as FakeProvider },
         defaultProvider: "ollama",
-        registry: testRegistry(),
+        registryFor: () => testRegistry(),
         store,
         systemPrompt: "test system prompt",
       }),

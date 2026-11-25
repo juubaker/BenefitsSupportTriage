@@ -42,11 +42,11 @@ export interface TicketContext {
 export interface PgTriageServicesFactory {
   /**
    * The terminal tools (triage_ticket, escalate_to_human) need to know which
-   * ticket they are finishing, and the tool schemas don't carry it. Bind the
-   * services per run, then build the registry per run:
+   * ticket they are finishing, and the tool schemas don't carry it. The
+   * harness calls registryFor per run, so bind the services there:
    *
-   *   const services = factory.forTicket({ ticketId, runId });
-   *   const harness = new AgentHarness({ registry: buildRegistry(services), ... });
+   *   registryFor: ({ ticketId, runId }) =>
+   *     buildRegistry(services.forTicket({ ticketId, runId }))
    */
   forTicket(ctx: TicketContext): TriageServices;
 }

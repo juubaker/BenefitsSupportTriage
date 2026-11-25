@@ -27,8 +27,11 @@ import { createPgTriageServices, type Queryable } from "./services/pg-triage-ser
 import { loadPricing } from "./pricing.js";
 
 export interface AgentRuntime {
-  /** A harness bound to one ticket. Build one per request. */
-  harnessFor(ticketId: string): AgentHarness;
+  /**
+   * One harness for the process. The per-run tool registry is built inside
+   * the harness via registryFor, so nothing needs binding per request.
+   */
+  harness: AgentHarness;
   /** Provider names actually configured, for /api/health. */
   providerNames: string[];
   defaultProvider: string;
@@ -64,17 +67,20 @@ export function createAgentRuntime(env: NodeJS.ProcessEnv = process.env): AgentR
   return {
     providerNames: Object.keys(providers),
     defaultProvider,
-    harnessFor(ticketId: string) {
-      return new AgentHarness({
-        providers,
-        defaultProvider: defaultProvider as never,
-        registry: buildRegistry(services.forTicket({ ticketId })),
-        store,
-        systemPrompt: SYSTEM_PROMPT,
-        pricing,
-        tracing,
-      });
-    },
+    harness: new AgentHarness({
+      providers,
+      defaultProvider: defaultProvider as never,
+      // registryFor hands us the runId, which only the harness knows. Binding
+      // the services with it is what populates triage_results.run_id — it was
+      // NULL on every row before, because the composition root had no runId
+      // to pass.
+      registryFor: ({ ticketId, runId }) =>
+        buildRegistry(services.forTicket({ ticketId, runId })),
+      store,
+      systemPrompt: SYSTEM_PROMPT,
+      pricing,
+      tracing,
+    }),
     async close() {
       await shutdownTracing?.();
       await pool.end();
