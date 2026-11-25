@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.1",
   "type": "module",
-  "description": "Oracle HCM Benefits support triage agent \u2014 categorizes Support posts, surfaces or drafts responses, and persists to Postgres via Drizzle. Also hosts the MCP server (src/index.ts) and the v2 agent sub-package (agent/).",
+  "description": "Oracle HCM Benefits support triage agent — categorizes Support posts, surfaces or drafts responses, and persists to Postgres via Drizzle. Also hosts the MCP server (src/index.ts) and the v2 agent sub-package (agent/).",
   "scripts": {
     "dev": "concurrently -n server,client -c yellow,cyan \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "node --watch server/index.js",
@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
-    "@modelcontextprotocol/sdk": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.2",
@@ -49,7 +49,7 @@
     "postgres": "^3.4.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
