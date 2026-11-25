@@ -49,7 +49,18 @@ import { z } from "zod";
 import { db } from "./db.js"; // SCHEMA: your existing Drizzle client (rag/db/client.ts)
 import { policyChunks, resolvedTickets } from "./db.js"; // SCHEMA: your existing tables
 import { sql, eq, desc } from "drizzle-orm";
-import { embed } from "./embeddings.js"; // Ollama nomic-embed-text wrapper, see embeddings.ts
+// The agent package's embedder, shared so the MCP server and the agent embed
+// queries identically. It also checks the vector width against the corpus,
+// which the local copy did not: a model mismatch used to return meaningless
+// nearest neighbours instead of failing.
+//
+// Imported from the agent's build rather than as a package dependency: the two
+// package trees disagree on Vitest majors, and a file: link makes npm fail
+// while reconciling their peer sets. agent/package.json declares the exports
+// map this should use once the versions are aligned and a workspace lands.
+import { createOllamaEmbedder } from "../agent/dist/src/services/index.js";
+
+const embed = createOllamaEmbedder();
 import { readLatestEvalReport } from "./eval.js"; // reads your DeepEval sidecar output
 import { runTriagePipeline } from "./triage.js"; // your existing agent-loop logic, extracted
 

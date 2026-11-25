@@ -11,19 +11,22 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['./src/test/setup.js'],
     css: false,
-    include: ['**/*.{test,spec}.{js,jsx}'],
+    // .ts included so the MCP server (TypeScript, and untested until now) can
+    // be covered here. agent/ and rag/ are excluded below, so their own .ts
+    // suites are not pulled in.
+    include: ['**/*.{test,spec}.{js,jsx,ts,tsx}'],
     // agent/ and rag/ are separate packages with their own runners; never
     // descend into them (or any nested node_modules) from the root suite.
     exclude: ['**/node_modules/**', '**/dist/**', '.idea', '.git', '.cache', 'agent/**', 'rag/**', 'evals/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
-      include: ['src/**/*.{js,jsx}', 'server/**/*.js'],
+      include: ['src/**/*.{js,jsx,ts}', 'server/**/*.js'],
       exclude: [
         'src/main.jsx',
         'src/test/**',
-        '**/*.test.{js,jsx}',
-        '**/*.spec.{js,jsx}',
+        '**/*.test.{js,jsx,ts}',
+        '**/*.spec.{js,jsx,ts}',
       ],
     },
   },
