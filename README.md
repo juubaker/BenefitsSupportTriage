@@ -127,7 +127,7 @@ Or with Claude Code: `claude mcp add benefits-support-triage -- node /absolute/p
 | `search_policies` | pgvector cosine search over `policy_chunks`, with chunk ids and similarity scores |
 | `find_similar_tickets` | pgvector cosine search over `resolved_tickets` |
 | `triage_ticket` | Retrieval plus a structured classification, with `retrieval_evidence` and `requires_human_review` |
-| `get_eval_metrics` | Reads an answer-quality report from `EVAL_REPORT_PATH`; returns a placeholder until one exists (see Status) |
+| `get_eval_metrics` | Reads the eval scorecard from `EVAL_REPORT_PATH`: case pass rate, per-metric and per-bucket rates, and failing cases. Says so plainly when no suite has run |
 
 Resources: `policy://chunk/{id}`, `ticket://{id}`, `ticket://{id}/resolution`,
 `eval://latest`. Prompt: `triage_summary_for_manager`.
@@ -216,9 +216,6 @@ pgvector corpora, plus the eval harness and golden set. In progress:
   `find_similar_tickets` keep their own SQL, which exposes `plan_type`
   filtering, resource URIs and corpus size that the agent's services do not.
   Worth reconciling, but not by dropping those fields.
-- **Eval metrics over MCP.** `get_eval_metrics` expects the v1 four-metric
-  report format; the v2 runner writes a trajectory scorecard in a different
-  format, so the tool returns a placeholder until the two are reconciled.
 - **Citation keys.** Ingest does not yet populate `policy_chunks.chunk_key`, so
   real-retrieval citations won't match the golden set's chunk slugs.
 - **Root tests in CI.** The web UI and Express suite runs locally but not yet

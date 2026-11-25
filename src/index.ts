@@ -61,7 +61,7 @@ import { sql, eq, desc } from "drizzle-orm";
 import { createOllamaEmbedder } from "../agent/dist/src/services/index.js";
 
 const embed = createOllamaEmbedder();
-import { readLatestEvalReport } from "./eval.js"; // reads your DeepEval sidecar output
+import { readLatestEvalReport, selectMetric } from "./eval.js";
 import { runTriagePipeline } from "./triage.js"; // your existing agent-loop logic, extracted
 
 // ---------------------------------------------------------------------------
@@ -93,16 +93,22 @@ const TriageTicketInput = z.object({
     .optional(),
 });
 
+/** The metrics evals/metrics.py scores, plus the nightly judge metric. */
+export const EVAL_METRIC_NAMES = [
+  "tool_choice_correctness",
+  "step_efficiency",
+  "retrieval_grounding",
+  "loop_discipline",
+  "min_retrieval",
+  "token_budget_adherence",
+  "escalation_correctness",
+  "outcome_correctness",
+  "grounding_recall",
+  "reasoning_quality",
+] as const;
+
 const GetEvalMetricsInput = z.object({
-  metric: z
-    .enum([
-      "all",
-      "contextual_precision",
-      "contextual_recall",
-      "faithfulness",
-      "answer_relevancy",
-    ])
-    .default("all"),
+  metric: z.enum(["all", ...EVAL_METRIC_NAMES]).default("all"),
 });
 
 // ---------------------------------------------------------------------------
@@ -187,18 +193,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_eval_metrics",
       description:
-        "Returns the latest DeepEval RAG evaluation results for this triage system: contextual precision, contextual recall, faithfulness, and answer relevancy against the golden dataset.",
+        "Returns the latest eval scorecard for this triage system: the case pass rate over the golden set, pass rates per metric and per bucket (base, multi-hop, adversarial, out-of-scope, budget, graph), and which cases failed. Reports availability honestly when no suite has been run.",
       inputSchema: {
         type: "object",
         properties: {
           metric: {
             type: "string",
+            description:
+              "A single metric to report, or all for the whole scorecard. Seven metrics score the trajectory, two the decision, and reasoning_quality is the nightly judge.",
             enum: [
               "all",
-              "contextual_precision",
-              "contextual_recall",
-              "faithfulness",
-              "answer_relevancy",
+              "tool_choice_correctness",
+              "step_efficiency",
+              "retrieval_grounding",
+              "loop_discipline",
+              "min_retrieval",
+              "token_budget_adherence",
+              "escalation_correctness",
+              "outcome_correctness",
+              "grounding_recall",
+              "reasoning_quality",
             ],
             default: "all",
           },
@@ -357,12 +371,8 @@ async function handleTriageTicket(input: z.infer<typeof TriageTicketInput>) {
 async function handleGetEvalMetrics(
   input: z.infer<typeof GetEvalMetricsInput>
 ) {
-  const report = await readLatestEvalReport(); // reads DeepEval sidecar JSON output
-
-  const payload =
-    input.metric === "all"
-      ? report
-      : { [input.metric]: report[input.metric], run_id: report.run_id };
+  const report = await readLatestEvalReport();
+  const payload = selectMetric(report, input.metric);
 
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
