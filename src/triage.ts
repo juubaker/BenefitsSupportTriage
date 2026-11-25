@@ -1,117 +1,154 @@
 /**
- * Extract your existing triage agent-loop logic (currently in your Express
- * route handler) into this shared module, so both the HTTP API and this
- * MCP server call the identical code path — no duplicated business logic,
- * and no risk of the two surfaces drifting apart.
+ * The MCP server's triage path, routed through the v2 agent.
  *
- * This stub sketches the shape: retrieve policy + ticket context, call the
- * Anthropic API to reason over it, return a structured result with
- * retrieval evidence attached.
+ * This file used to be a stub with its own retrieval and a single Anthropic
+ * call, and its own header asked for exactly this change: "so both the HTTP
+ * API and this MCP server call the identical code path — no duplicated
+ * business logic, and no risk of the two surfaces drifting apart."
+ *
+ * They had drifted. The stub ranked by distance with no similarity floor, so
+ * it returned the three nearest chunks however poor they were; it accepted
+ * whatever category the model invented; and nothing checked that a cited
+ * chunk had actually been retrieved. Running the agent instead means the MCP
+ * surface gets the bounded loop, the 0.65 floor, the fixed taxonomy, citation
+ * enforcement against what the run really saw, and escalation when the corpus
+ * cannot answer — plus a persisted run in agent_runs/agent_steps that can be
+ * scored by the eval suite afterwards.
+ *
+ * The trade is latency: a loop with retrieval is seconds, not a single call.
  */
 
-import { embed } from "./embeddings.js";
-import { db, policyChunks, resolvedTickets } from "./db.js";
-import { sql } from "drizzle-orm";
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic();
+import { randomUUID } from "node:crypto";
+// Type-only imports: erased at runtime, so loading this module does not
+// require the agent to have been built. The runtime itself is imported
+// dynamically below — see getRuntime().
+import type { AgentRuntime } from "../agent/dist/src/create-harness.js";
+import type { AgentEvent, TerminalState } from "../agent/dist/src/types.js";
 
 export interface TriageResult {
-  category: string;
-  priority: "low" | "medium" | "high";
+  category: string | null;
+  priority: "low" | "medium" | "high" | null;
   draft_response: string;
-  confidence: number;
+  requires_human_review: boolean;
+  escalated: boolean;
+  escalation_reason: string | null;
   retrieval_evidence: {
     policy_chunks_used: string[];
     similar_tickets_used: string[];
-    retrieval_scores: Record<string, number>;
+    /** Best similarity each retrieval tool reported, keyed by tool. */
+    top_scores: Record<string, number>;
   };
-  requires_human_review: boolean;
+  /** For joining back to agent_runs / agent_steps / triage_results. */
+  run: { id: string | null; terminal_state: TerminalState | null; steps: number };
 }
 
-export async function runTriagePipeline(params: {
-  ticketText: string;
-  employeeContext?: { plan_type?: string; enrollment_status?: string };
-}): Promise<TriageResult> {
-  const queryEmbedding = await embed(params.ticketText);
-  const vectorLiteral = `'[${queryEmbedding.join(",")}]'::vector`;
+/**
+ * One runtime per process: it owns a pg pool. Built lazily so importing this
+ * module does not require a database — the MCP server's other tools work
+ * without the agent.
+ */
+let runtime: AgentRuntime | undefined;
+async function getRuntime(): Promise<AgentRuntime> {
+  if (!runtime) {
+    // Imported here, not at module load: a static import would make `npm test`
+    // fail on a clean clone, since agent/dist does not exist until the agent is
+    // built. Running a triage needs a database anyway, so paying the import
+    // cost at first use costs nothing real.
+    const { createAgentRuntime } = await import("../agent/dist/src/create-harness.js");
+    runtime = createAgentRuntime();
+  }
+  return runtime;
+}
 
-  const [policyResults, ticketResults] = await Promise.all([
-    db
-      .select({
-        id: policyChunks.id,
-        chunkText: policyChunks.chunkText,
-        similarity: sql<number>`1 - (${policyChunks.embedding} <=> ${sql.raw(
-          vectorLiteral
-        )})`,
-      })
-      .from(policyChunks)
-      .orderBy(sql`${policyChunks.embedding} <=> ${sql.raw(vectorLiteral)}`)
-      .limit(3),
-    db
-      .select({
-        id: resolvedTickets.id,
-        approvedResponse: resolvedTickets.approvedResponse,
-        similarity: sql<number>`1 - (${resolvedTickets.embedding} <=> ${sql.raw(
-          vectorLiteral
-        )})`,
-      })
-      .from(resolvedTickets)
-      .orderBy(sql`${resolvedTickets.embedding} <=> ${sql.raw(vectorLiteral)}`)
-      .limit(3),
-  ]);
+export async function closeTriagePipeline(): Promise<void> {
+  await runtime?.close();
+  runtime = undefined;
+}
 
-  const contextBlock = [
-    "Relevant policy excerpts:",
-    ...policyResults.map((p) => `- (${p.id}) ${p.chunkText}`),
-    "",
-    "Similar past ticket resolutions:",
-    ...ticketResults.map((t) => `- (${t.id}) ${t.approvedResponse ?? ""}`),
-  ].join("\n");
+/** "urgent" is a valid agent priority but not part of this tool's contract. */
+function narrowPriority(p: string | undefined): TriageResult["priority"] {
+  if (p === "low" || p === "medium" || p === "high") return p;
+  if (p === "urgent") return "high";
+  return null;
+}
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1000,
-    system:
-      "You are a benefits support triage assistant. Given a support ticket and retrieved context, classify it and draft a response. Respond ONLY as JSON with keys: category, priority (low|medium|high), draft_response, confidence (0-1).",
-    messages: [
-      {
-        role: "user",
-        content: `Ticket: ${params.ticketText}\n\nEmployee context: ${JSON.stringify(
-          params.employeeContext ?? {}
-        )}\n\nContext:\n${contextBlock}`,
-      },
-    ],
-  });
+const TOP_SCORE = /top score ([\d.]+)/;
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  const parsed = JSON.parse(
-    (textBlock?.type === "text" ? textBlock.text : "{}").replace(
-      /```json|```/g,
-      ""
-    )
-  );
+/** Just enough of AgentHarness to run and map a triage, so tests need no database. */
+export interface RunnableHarness {
+  run(req: { ticketId: string; subject: string; body: string }): AsyncIterable<AgentEvent>;
+}
 
-  const topSimilarity = Math.max(
-    ...policyResults.map((p) => p.similarity),
-    ...ticketResults.map((t) => t.similarity),
-    0
-  );
+export async function runTriagePipeline(
+  params: {
+    ticketText: string;
+    employeeContext?: { plan_type?: string; enrollment_status?: string };
+  },
+  /** Injectable for tests; defaults to the process runtime's harness. */
+  harnessOverride?: RunnableHarness,
+): Promise<TriageResult> {
+  const ticketId = `mcp-${randomUUID()}`;
+  const harness = harnessOverride ?? ((await getRuntime()).harness as unknown as RunnableHarness);
 
-  const retrieval_scores: Record<string, number> = {};
-  for (const p of policyResults) retrieval_scores[String(p.id)] = p.similarity;
-  for (const t of ticketResults) retrieval_scores[String(t.id)] = t.similarity;
+  // employeeContext has no field on the agent's ticket, and inventing one
+  // would change what the model is grounded on. Appended to the body so it is
+  // visible to the model without pretending to be retrieved evidence.
+  const context = params.employeeContext
+    ? Object.entries(params.employeeContext)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ")
+    : "";
+
+  const top_scores: Record<string, number> = {};
+  let runId: string | null = null;
+  let terminal: TerminalState | null = null;
+  let steps = 0;
+  let escalationReason: string | null = null;
+  let result: { category?: string; priority?: string; summary?: string; citations?: string[]; escalated?: boolean } | undefined;
+
+  for await (const event of harness.run({
+    ticketId,
+    subject: params.ticketText.slice(0, 120),
+    body: context ? `${params.ticketText}\n\nEmployee context: ${context}` : params.ticketText,
+  })) {
+    if (event.type === "run_started") runId = event.runId;
+    if (event.type === "step_started") steps = event.step;
+    if (event.type === "tool_call" && event.name === "escalate_to_human") {
+      const reason = (event.args as { reason?: unknown })?.reason;
+      if (typeof reason === "string") escalationReason = reason;
+    }
+    if (event.type === "tool_result" && !event.isError) {
+      const m = TOP_SCORE.exec(event.summary);
+      if (m) top_scores[event.name] = Number(m[1]);
+    }
+    if (event.type === "terminal") {
+      terminal = event.state;
+      result = event.result;
+    }
+  }
+
+  const citations = result?.citations ?? [];
+  const escalated = Boolean(result?.escalated) || escalationReason !== null;
 
   return {
-    category: parsed.category ?? "uncategorized",
-    priority: parsed.priority ?? "medium",
-    draft_response: parsed.draft_response ?? "",
-    confidence: parsed.confidence ?? 0,
+    category: result?.category ?? null,
+    priority: narrowPriority(result?.priority),
+    draft_response: result?.summary ?? "",
+    // The stub derived this from a model-reported confidence score. The agent
+    // reports no confidence, and a fabricated number is worse than none, so
+    // this is now grounded in what actually happened: the run escalated, or it
+    // did not finish cleanly through a terminal tool.
+    requires_human_review: escalated || terminal !== "completed",
+    escalated,
+    escalation_reason: escalationReason,
     retrieval_evidence: {
-      policy_chunks_used: policyResults.map((p) => String(p.id)),
-      similar_tickets_used: ticketResults.map((t) => String(t.id)),
-      retrieval_scores,
+      // Enforced at the terminal tool: every id here appeared in a tool result
+      // during this run.
+      policy_chunks_used: citations.filter((c) => c.startsWith("chunk-")),
+      similar_tickets_used: citations.filter((c) => c.startsWith("R-")),
+      top_scores,
     },
-    requires_human_review: topSimilarity < 0.75 || (parsed.confidence ?? 0) < 0.6,
+    run: { id: runId, terminal_state: terminal, steps },
   };
 }

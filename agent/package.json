@@ -1,5 +1,6 @@
 {
   "name": "benefits-triage-agent",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -37,5 +38,29 @@
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./harness": {
+      "types": "./dist/src/create-harness.d.ts",
+      "import": "./dist/src/create-harness.js"
+    },
+    "./services": {
+      "types": "./dist/src/services/index.d.ts",
+      "import": "./dist/src/services/index.js"
+    },
+    "./tools": {
+      "types": "./dist/src/tools.d.ts",
+      "import": "./dist/src/tools.js"
+    },
+    "./types": {
+      "types": "./dist/src/types.d.ts",
+      "import": "./dist/src/types.js"
+    }
   }
 }

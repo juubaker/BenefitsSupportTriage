@@ -212,8 +212,10 @@ pgvector corpora, plus the eval harness and golden set. In progress:
   replace them.
 - **One schema.** `server/db`, `rag/db` and `agent/src/db` each have their own
   Drizzle schema and migrations, to be merged into one journal.
-- **MCP triage on the agent loop.** `triage_ticket` runs a single
-  retrieval-then-classify pass in `src/triage.ts` rather than the agent loop.
+- **Retrieval tool overlap.** The MCP server's `search_policies` and
+  `find_similar_tickets` keep their own SQL, which exposes `plan_type`
+  filtering, resource URIs and corpus size that the agent's services do not.
+  Worth reconciling, but not by dropping those fields.
 - **Eval metrics over MCP.** `get_eval_metrics` expects the v1 four-metric
   report format; the v2 runner writes a trajectory scorecard in a different
   format, so the tool returns a placeholder until the two are reconciled.

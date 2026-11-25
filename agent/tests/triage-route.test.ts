@@ -2,7 +2,7 @@
 // harness directly, which is how two route-level bugs got through: the run
 // being filed as "aborted" when the client breaks on the terminal event, and
 // the request-stream "close" listener aborting every run on arrival.
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 import { z } from "zod";
@@ -195,6 +195,14 @@ describe("error reporting", () => {
       cause: pgError,
     });
 
+    // The route logs the failure, which is the point of the change under test.
+    // Silenced here so a synthetic error does not print on every suite run and
+    // read as a real failure.
+    const logged: unknown[][] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args) => {
+      logged.push(args);
+    });
+
     const store = new MemoryRunStore();
     const app = express();
     app.use(express.json());
@@ -222,5 +230,8 @@ describe("error reporting", () => {
     expect(error?.data.cause).toBe('relation "agent_runs" does not exist');
     expect(error?.data.code).toBe("42P01");
     expect(store.runs.size).toBe(0);
+    // The operator-facing log carries it too, which the stream alone did not.
+    expect(JSON.stringify(logged)).toContain("does not exist");
+    spy.mockRestore();
   });
 });
