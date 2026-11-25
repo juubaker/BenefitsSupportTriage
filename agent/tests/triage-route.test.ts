@@ -179,3 +179,46 @@ describe("POST /api/triage over real HTTP", () => {
     expect(run?.terminalState).toBe("aborted");
   });
 });
+
+describe("error reporting", () => {
+  it("names the cause and its code, not just the wrapper message", async () => {
+    // A Drizzle failure arrives as "Failed query: insert into ..." with the
+    // real Postgres error — relation missing, connection refused — in `cause`.
+    // Reporting only the wrapper is what made this undiagnosable from the
+    // client.
+    const pgError = Object.assign(new Error('relation "agent_runs" does not exist'), {
+      code: "42P01",
+    });
+    const wrapped = Object.assign(new Error("Failed query: insert into \"agent_runs\"\nparams: x"), {
+      cause: pgError,
+    });
+
+    const store = new MemoryRunStore();
+    const app = express();
+    app.use(express.json());
+    app.use(
+      triageRouter(() => {
+        throw wrapped;
+      }),
+    );
+    const server: Server = await new Promise((resolve) => {
+      const s = app.listen(0, () => resolve(s));
+    });
+    open = server;
+    const { port } = server.address() as { port: number };
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/triage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(TICKET),
+    });
+    const frames = parseFrames(await res.text());
+    const error = frames.find((f) => f.event === "error");
+
+    expect(error?.data.message).toContain("Failed query");
+    expect(error?.data.message).not.toContain("params:");
+    expect(error?.data.cause).toBe('relation "agent_runs" does not exist');
+    expect(error?.data.code).toBe("42P01");
+    expect(store.runs.size).toBe(0);
+  });
+});
