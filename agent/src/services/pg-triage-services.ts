@@ -30,6 +30,8 @@ export interface PgTriageServicesOptions {
   embed: Embedder;
   /** Similarity floor: weak matches are worse than no match. */
   minSimilarity?: number;
+  /** Floor for the resolved-ticket corpus, which needs its own (see below). */
+  ticketMinSimilarity?: number;
   /** Hard cap on rows per tool call, independent of what the model asks for. */
   maxK?: number;
 }
@@ -55,6 +57,26 @@ export interface PgTriageServicesFactory {
 // balanced peak on this corpus (recall 0.77, and every out-of-scope case
 // correctly returns nothing). 0.7+ discards a third of real evidence.
 const DEFAULT_MIN_SIMILARITY = 0.65;
+
+/**
+ * The resolved-ticket corpus needs a lower floor than the policy corpus, and
+ * measuring it (evals/ticket_floor.py) gave a cleaner answer than expected.
+ *
+ * Across all 40 golden cases, the best-matching resolved ticket scores at most
+ * 0.5779 for every case that must escalate — all five adversarial and all five
+ * out-of-scope — while every multi-hop case lands between 0.6684 and 0.8824.
+ * 0.60 sits in that gap: no case that should be handed to a human can pick up
+ * a citable precedent, and 24 of the 30 answerable cases get a real one.
+ *
+ * That boundary matters beyond retrieval quality. A triage with no citations
+ * is refused so the run escalates, but a cited R- id satisfies that guard —
+ * so spurious precedent on an out-of-scope ticket would quietly undo it.
+ *
+ * 0.65 (inherited from the policy sweep) left this corpus returning nothing at
+ * all; the six cases below 0.60 lose precedent they could have used, which is
+ * the right direction to err.
+ */
+const DEFAULT_TICKET_MIN_SIMILARITY = 0.6;
 const DEFAULT_MAX_K = 10;
 
 /** Stable, model-visible id for a policy chunk. Citations are checked against these. */
@@ -69,6 +91,7 @@ export function resolvedTicketId(row: { id: number | string }): string {
 export function createPgTriageServices(opts: PgTriageServicesOptions): PgTriageServicesFactory {
   const { db, embed } = opts;
   const minSimilarity = opts.minSimilarity ?? DEFAULT_MIN_SIMILARITY;
+  const ticketMinSimilarity = opts.ticketMinSimilarity ?? DEFAULT_TICKET_MIN_SIMILARITY;
   const maxK = opts.maxK ?? DEFAULT_MAX_K;
   const clamp = (k: number) => Math.max(1, Math.min(Math.trunc(k) || 1, maxK));
 
@@ -112,7 +135,7 @@ export function createPgTriageServices(opts: PgTriageServicesOptions): PgTriageS
         WHERE 1 - (embedding <=> $1::vector) > $2
         ORDER BY embedding <=> $1::vector
         LIMIT $3`,
-      [vector, minSimilarity, clamp(k)],
+      [vector, ticketMinSimilarity, clamp(k)],
     );
     return rows.map((r) => ({
       ticketId: resolvedTicketId(r),

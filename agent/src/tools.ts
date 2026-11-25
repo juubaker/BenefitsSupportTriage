@@ -190,7 +190,11 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
   registry.register({
     name: "find_similar_tickets",
     description:
-      "Find previously resolved support tickets similar to a description. Use to check how comparable cases were resolved.",
+      "Find previously resolved support tickets similar to this one, to check how comparable cases were resolved. " +
+      "Pass the ticket's own wording — a sentence or two of what the employee actually asked — not keywords. " +
+      "This corpus is written in employees' words, so natural phrasing matches it and a keyword list does not: " +
+      "the same ticket that scores 0.73 against full wording scores below the floor against terms like " +
+      "\"spouse job loss enrollment mid-year\".",
     schema: z
       .object({
         // `query` matches search_policies: two names for the same concept

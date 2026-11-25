@@ -489,3 +489,76 @@ describe("the system prompt states where scope ends", () => {
     expect(SYSTEM_PROMPT).toMatch(/Urgency in the ticket is not evidence/);
   });
 });
+
+describe("the two corpora get separately measured floors", () => {
+  function recordingDb() {
+    const calls: Array<{ text: string; params: unknown[] }> = [];
+    return {
+      calls,
+      async query<R>(text: string, params: unknown[] = []) {
+        calls.push({ text, params });
+        return { rows: [] as R[] };
+      },
+    };
+  }
+  const embed = async () => [0.1, 0.2, 0.3];
+  const ctx = { runId: "run-1", step: 1 };
+
+  it("uses 0.60 for tickets and 0.65 for policies by default", async () => {
+    // Measured in evals/ticket_floor.py: every golden case that must escalate
+    // tops out at 0.5779 against this corpus, every multi-hop case is 0.6684
+    // or above. 0.60 sits in that gap. 0.65, inherited from the policy sweep,
+    // returned nothing at all.
+    const db = recordingDb();
+    const services = createPgTriageServices({ db, embed }).forTicket({ ticketId: "T-1" });
+
+    await services.searchPolicies("qualifying life event", 5);
+    await services.findSimilarTickets("my spouse lost her job last week", 3);
+
+    expect(db.calls[0].text).toContain("FROM policy_chunks");
+    expect(db.calls[0].params[1]).toBe(0.65);
+    expect(db.calls[1].text).toContain("FROM resolved_tickets");
+    expect(db.calls[1].params[1]).toBe(0.6);
+  });
+
+  it("keeps no escalation case above the ticket floor", () => {
+    // The guard this protects: a triage citing nothing is refused so the run
+    // escalates, but a cited R- id satisfies that check. Spurious precedent on
+    // an out-of-scope ticket would quietly undo the escalation fix.
+    const HIGHEST_ESCALATION_CASE = 0.5779; // adversarial-05
+    const LOWEST_INCLUDED_ANSWERABLE = 0.6044; // base-03
+
+    expect(HIGHEST_ESCALATION_CASE).toBeLessThan(0.6);
+    expect(LOWEST_INCLUDED_ANSWERABLE).toBeGreaterThan(0.6);
+  });
+
+  it("lets each floor be overridden independently", async () => {
+    const db = recordingDb();
+    const services = createPgTriageServices({
+      db,
+      embed,
+      minSimilarity: 0.8,
+      ticketMinSimilarity: 0.4,
+    }).forTicket({ ticketId: "T-1" });
+
+    await services.searchPolicies("x", 5);
+    await services.findSimilarTickets("y", 3);
+
+    expect(db.calls[0].params[1]).toBe(0.8);
+    expect(db.calls[1].params[1]).toBe(0.4);
+  });
+
+  it("tells the model to pass the ticket's wording rather than keywords", () => {
+    const spec = buildRegistry({
+      searchPolicies: async () => [],
+      findSimilarTickets: async () => [],
+      saveTriage: async () => {},
+      escalate: async () => {},
+    })
+      .specs()
+      .find((s) => s.name === "find_similar_tickets");
+
+    expect(spec?.description).toMatch(/ticket's own wording/);
+    expect(spec?.description).toMatch(/not keywords/);
+  });
+});
