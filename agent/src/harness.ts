@@ -43,7 +43,7 @@ export interface RunStore {
 export interface HarnessDeps {
   providers: Partial<Record<ProviderName, ProviderAdapter>>;
   defaultProvider: ProviderName;
-  registry: ToolRegistry;
+  registryFor: (ctx: { ticketId: string; runId: string }) => ToolRegistry;
   store: RunStore;
   systemPrompt: string;
   /** Phase 2: spec §6 budgeter (with optional cheap-model summarizer). */
@@ -55,9 +55,7 @@ export interface HarnessDeps {
 }
 
 export class AgentHarness {
-  constructor(private deps: HarnessDeps) {
-    if (deps.tracing) deps.registry.setExecuteWrapper(deps.tracing.executeWrapper());
-  }
+  constructor(private deps: HarnessDeps) {}
 
   async *run(req: TriageRequest, opts: RunOptions = {}): AsyncIterable<AgentEvent> {
     const { tracing } = this.deps;
@@ -67,7 +65,9 @@ export class AgentHarness {
     if (!provider) throw new Error(`Provider not configured: ${providerName}`);
 
     const runId = randomUUID();
-    const runConfigHash = this.configHash(provider, opts);
+    const registry = this.deps.registryFor({ ticketId: req.ticketId, runId });
+    if (this.deps.tracing) registry.setExecuteWrapper(this.deps.tracing.executeWrapper());
+    const runConfigHash = this.configHash(provider, opts, registry);
     const totals = { input: 0, output: 0 };
     let stepCount = 0;
     let terminal: TerminalState = "aborted";
@@ -100,7 +100,7 @@ export class AgentHarness {
       const gen = runLoop(
         {
           provider: traced,
-          registry: this.deps.registry,
+          registry,
           runId,
           systemPrompt: this.deps.systemPrompt,
           budgeter: this.deps.budgeter,
@@ -137,10 +137,14 @@ export class AgentHarness {
           // Durable before the loop advances: next() isn't called until these resolve.
           await this.deps.store.appendStep(event.record);
           await this.deps.store.recordLedger(event.record);
+          stepCount = event.record.stepNo;
           if (stepScope) {
             tracing!.endStep(stepScope, event.record);
             stepScope = undefined;
           }
+        }
+        if (event.type === "terminal") {
+          terminal = event.state;
         }
         yield event;
       }
@@ -213,7 +217,7 @@ export class AgentHarness {
   }
 
   /** Attribute eval regressions to code vs prompt vs model changes (spec §5). */
-  private configHash(provider: ProviderAdapter, opts: RunOptions): string {
+private configHash(provider: ProviderAdapter, opts: RunOptions, registry: ToolRegistry): string {
     return createHash("sha256")
       .update(
         JSON.stringify({
@@ -222,7 +226,7 @@ export class AgentHarness {
           maxSteps: opts.maxSteps ?? 8,
           budget: { ...DEFAULT_BUDGET, ...opts.tokenBudget },
           systemPrompt: this.deps.systemPrompt,
-          tools: this.deps.registry.specs().map((t) => t.name),
+          tools: registry.specs().map((t) => t.name),
         }),
       )
       .digest("hex")

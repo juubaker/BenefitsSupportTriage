@@ -63,7 +63,7 @@ function buildHarness(store = new MemoryRunStore()) {
     harness: new AgentHarness({
       providers: { ollama: fake },
       defaultProvider: "ollama",
-      registry,
+      registryFor: () => registry,
       store,
       systemPrompt: "sys",
       tracing: new AgentTracing(trace.getTracer("test")),

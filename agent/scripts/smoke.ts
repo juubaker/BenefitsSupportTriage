@@ -158,13 +158,13 @@ async function main() {
     ? new AgentHarness({
         providers: { ollama: fakeProvider() },
         defaultProvider: "ollama",
-        registry,
+        registryFor: () => registry,
         store,
         systemPrompt: SYSTEM_PROMPT,
       })
     : new AgentHarness({
         ...buildProviders(),
-        registry,
+        registryFor: () => registry,
         store,
         systemPrompt: SYSTEM_PROMPT,
       });

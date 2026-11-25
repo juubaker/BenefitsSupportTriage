@@ -39,7 +39,7 @@ export function triageRouter(source: HarnessSource): Router {
     res.flushHeaders?.();
 
     const abort = new AbortController();
-    req.on("close", () => abort.abort());
+    res.on("close", () => abort.abort());
     const heartbeat = setInterval(() => res.write(": keep-alive\n\n"), 15_000);
 
     const send = (event: string, data: unknown) => {
@@ -53,6 +53,7 @@ export function triageRouter(source: HarnessSource): Router {
         if (event.type === "step_completed") continue;
         send(event.type, event);
         if (event.type === "terminal") break;
+
       }
     } catch (err) {
       send("error", { message: err instanceof Error ? err.message : "run failed" });
