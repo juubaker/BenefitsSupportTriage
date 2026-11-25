@@ -7,6 +7,7 @@ import {
 import { createOllamaEmbedder, toVectorLiteral } from "../src/services/embeddings.js";
 import {
   buildRegistry,
+  SYSTEM_PROMPT,
   CATEGORY_GUIDANCE,
   TRIAGE_CATEGORIES,
   TRIAGE_PRIORITIES,
@@ -391,5 +392,100 @@ describe("taxonomy guidance in the tool schema", () => {
 
   it("keeps the guidance and the enum in step", () => {
     expect(Object.keys(CATEGORY_GUIDANCE).sort()).toEqual([...TRIAGE_CATEGORIES].sort());
+  });
+});
+
+describe("an ungrounded triage is rejected in favour of escalation", () => {
+  const emptyCorpus = {
+    searchPolicies: async () => [],
+    findSimilarTickets: async () => [],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const withEvidence = {
+    ...emptyCorpus,
+    searchPolicies: async () => [{ chunkId: "chunk-qle-12", text: "…", score: 0.78 }],
+  };
+  const ctx = { runId: "run-1", step: 1 };
+  const decision = (citations: string[]) => ({
+    category: "enrollment",
+    priority: "low",
+    summary: "Payroll direct deposit correction.",
+    citations,
+    escalated: false,
+  });
+
+  it("refuses a triage that cites nothing and names escalation as the alternative", async () => {
+    // oos-01: the agent answered "enrollment/low" for a payroll question with
+    // no citations at all, rather than escalating.
+    const registry = buildRegistry(emptyCorpus);
+    await registry.execute("search_policies", { query: "direct deposit wrong account", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision([]), ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+    expect(res.error).toContain("escalate_to_human");
+    expect(res.error).toMatch(/no search in this run returned any/);
+  });
+
+  it("lists the available ids when searches did return evidence the model ignored", async () => {
+    const registry = buildRegistry(withEvidence);
+    await registry.execute("search_policies", { query: "spouse mid-year", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision([]), ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toContain("chunk-qle-12");
+    expect(res.error).toContain("escalate_to_human");
+  });
+
+  it("still accepts a triage that cites retrieved evidence", async () => {
+    const registry = buildRegistry(withEvidence);
+    await registry.execute("search_policies", { query: "spouse mid-year", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision(["chunk-qle-12"]), ctx);
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("leaves escalate_to_human reachable with no evidence at all", async () => {
+    // The whole point: when nothing was retrieved, escalation is the only exit.
+    const registry = buildRegistry(emptyCorpus);
+    await registry.execute("search_policies", { query: "parking permit", k: 5 }, ctx);
+
+    const res = await registry.execute(
+      "escalate_to_human",
+      { ticketId: "oos-05", reason: "Facilities request; outside the benefits policy corpus." },
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("reports an empty policy search as absence of coverage, not a neutral zero", async () => {
+    const registry = buildRegistry(emptyCorpus);
+
+    const res = await registry.execute("search_policies", { query: "reset my password", k: 5 }, ctx);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.output.summary).toMatch(/no policy passage above the similarity floor/);
+    expect(res.output.summary).toContain("escalate_to_human");
+  });
+});
+
+describe("the system prompt states where scope ends", () => {
+  it("names the out-of-scope areas the golden set expects to be escalated", () => {
+    for (const subject of ["direct deposit", "PTO", "passwords", "Performance", "parking"]) {
+      expect(SYSTEM_PROMPT).toContain(subject);
+    }
+  });
+
+  it("tells the agent that an underspecified ticket escalates", () => {
+    expect(SYSTEM_PROMPT).toMatch(/am I covered\?/);
+    expect(SYSTEM_PROMPT).toMatch(/Urgency in the ticket is not evidence/);
   });
 });

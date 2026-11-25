@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AgentHarness, MemoryRunStore } from "../src/harness.js";
 import { ToolRegistry } from "../src/registry.js";
 import { FakeProvider, type ScriptedTurn } from "../src/testing/fake-provider.js";
-import { triageResultSchema } from "../src/tools.js";
+import { buildRegistry, SYSTEM_PROMPT, triageResultSchema } from "../src/tools.js";
 import type { AgentEvent, TriageRequest } from "../src/types.js";
 
 const TICKET: TriageRequest = {
@@ -409,5 +409,104 @@ describe("persisted tool arguments", () => {
 
     const failed = [...store.steps][0].toolCalls[0];
     expect(failed.args).toEqual({ q: "wrong field" });
+  });
+});
+
+describe("escalation after an ungrounded triage is refused", () => {
+  /**
+   * The loop-level counterpart to the registry tests: a rejected triage has to
+   * lead the model somewhere, and the only honest exit when nothing was
+   * retrieved is escalate_to_human. Built against the real buildRegistry so
+   * the grounding check under test is the production one.
+   */
+  async function runOutOfScope(turns: ScriptedTurn[]) {
+    const escalations: Array<{ ticketId: string; reason: string }> = [];
+    const registry = buildRegistry({
+      searchPolicies: async () => [],
+      findSimilarTickets: async () => [],
+      saveTriage: async () => {
+        throw new Error("saveTriage must not be reached for an out-of-scope ticket");
+      },
+      escalate: async (ticketId: string, reason: string) => {
+        escalations.push({ ticketId, reason });
+      },
+    });
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: { ollama: new FakeProvider(turns) },
+      defaultProvider: "ollama",
+      registry,
+      store,
+      systemPrompt: SYSTEM_PROMPT,
+    });
+    const events: AgentEvent[] = [];
+    for await (const e of harness.run({
+      ticketId: "oos-01",
+      subject: "Payroll direct deposit",
+      body: "My paycheck went to the wrong bank account. Can you fix my direct deposit?",
+    })) {
+      events.push(e);
+    }
+    return { events, terminal: events.find((e) => e.type === "terminal"), escalations };
+  }
+
+  it("turns a no-evidence triage attempt into an escalation", async () => {
+    const { terminal, escalations } = await runOutOfScope([
+      {
+        text: "Searching.",
+        toolCalls: [{ name: "search_policies", input: { query: "direct deposit wrong account", k: 5 } }],
+      },
+      {
+        text: "Nothing found, but I will categorise it anyway.",
+        toolCalls: [
+          {
+            name: "triage_ticket",
+            input: {
+              category: "plan_administration",
+              priority: "low",
+              summary: "Direct deposit correction.",
+              citations: [],
+              escalated: false,
+            },
+          },
+        ],
+      },
+      {
+        text: "Understood — out of scope.",
+        toolCalls: [
+          {
+            name: "escalate_to_human",
+            input: { ticketId: "oos-01", reason: "Payroll request; outside the benefits policy corpus." },
+          },
+        ],
+      },
+    ]);
+
+    // "completed" means the loop terminated through a terminal tool; which
+    // one it was lives in the tool calls and in triage_results.escalated.
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(escalations).toHaveLength(1);
+    expect(escalations[0].reason).toContain("Payroll");
+  });
+
+  it("lets the agent escalate directly off an empty search, with no refusal needed", async () => {
+    const { terminal, escalations } = await runOutOfScope([
+      {
+        text: "Searching.",
+        toolCalls: [{ name: "search_policies", input: { query: "parking permit garage", k: 5 } }],
+      },
+      {
+        text: "The corpus does not cover this.",
+        toolCalls: [
+          {
+            name: "escalate_to_human",
+            input: { ticketId: "oos-01", reason: "Facilities request; no policy evidence exists." },
+          },
+        ],
+      },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(escalations).toHaveLength(1);
   });
 });

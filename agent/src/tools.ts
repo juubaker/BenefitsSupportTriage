@@ -166,9 +166,16 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
         // The ids belong in the summary: agent_steps persists only this string,
         // and the eval's grounding metric recovers what the run actually saw
         // from it. Without them every citation looks hallucinated.
-        summary: `search_policies("${query}") -> ${rows.length} chunks [${rows
-          .map((r) => r.chunkId)
-          .join(", ")}], top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
+        // An empty result is itself evidence — of absence. Reported as a bare
+        // "0 chunks" the model read it as neutral and triaged anyway, so it
+        // says what the absence means.
+        summary:
+          rows.length === 0
+            ? `search_policies("${query}") -> no policy passage above the similarity floor. ` +
+              `The corpus does not cover this; consider escalate_to_human.`
+            : `search_policies("${query}") -> ${rows.length} chunks [${rows
+                .map((r) => r.chunkId)
+                .join(", ")}], top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
       };
     },
   });
@@ -196,9 +203,12 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
       note(ctx.runId, rows.map((r) => r.ticketId));
       return {
         data: rows,
-        summary: `find_similar_tickets -> ${rows.length} matches [${rows
-          .map((r) => r.ticketId)
-          .join(", ")}], top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
+        summary:
+          rows.length === 0
+            ? `find_similar_tickets -> no comparable resolved ticket above the similarity floor.`
+            : `find_similar_tickets -> ${rows.length} matches [${rows
+                .map((r) => r.ticketId)
+                .join(", ")}], top score ${rows[0]?.score?.toFixed(2) ?? "n/a"}`,
       };
     },
   });
@@ -211,6 +221,29 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
     terminal: true,
     handler: async (input, ctx) => {
       const seen = observed.get(ctx.runId) ?? new Set<string>();
+
+      // An ungrounded decision is not a decision. All ten escalation cases
+      // (5 out_of_scope, 5 adversarial) failed because the agent filed a
+      // triage with an empty citation list rather than escalating: oos-01
+      // answered "enrollment/low" for a payroll question it had no evidence
+      // for. Every one of the 30 answerable golden cases declares at least
+      // one grounding id, so "cite something or escalate" holds across the
+      // whole set. Paired with the unseen-id check below, the model cannot
+      // cite nothing and cannot cite what it did not retrieve, which leaves
+      // escalate_to_human as the only honest exit.
+      if ((input.citations ?? []).length === 0) {
+        observed.delete(ctx.runId);
+        throw new ToolValidationError(
+          seen.size > 0
+            ? `A triage must cite the evidence it rests on, and this call cited none. ` +
+              `Either cite the ids your searches returned (available: ${[...seen].join(", ")}), ` +
+              `or call escalate_to_human if none of them actually answer this ticket.`
+            : `A triage must cite the evidence it rests on, and no search in this run returned any. ` +
+              `Nothing in the policy corpus or the resolved tickets supports an answer here, so call ` +
+              `escalate_to_human with the reason instead of triaging.`,
+        );
+      }
+
       const unseen = (input.citations ?? []).filter((c) => !seen.has(c));
       if (unseen.length > 0) {
         observed.delete(ctx.runId);
@@ -255,9 +288,21 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
 
 export const SYSTEM_PROMPT = `You are a benefits support triage agent. Your job: classify the ticket, set priority, summarize the issue, and ground everything in evidence.
 
+Your scope is the employee benefits policy corpus: medical, dental, vision and pharmacy coverage; eligibility and enrollment; spending accounts (HSA and FSA); disability, life insurance, leave; retirement and 401(k); commuter benefits; and the employee assistance program.
+
+Out of scope — escalate these, do not triage them:
+- Payroll and pay mechanics: paychecks, direct deposit, tax withholding.
+- Time off: PTO and vacation balances, holiday schedules.
+- IT and access: passwords, portal logins, system errors.
+- Performance, compensation reviews, and employment status.
+- Facilities: parking permits, badges, desks.
+- Anything needing account-specific data you cannot see, or any request to CHANGE an election on the employee's behalf. You classify tickets; you do not act on accounts.
+
+Also escalate when the ticket is too underspecified to triage — "am I covered?", "my benefits are wrong, fix it" — rather than picking a category to have an answer. Urgency in the ticket is not evidence and does not lower this bar.
+
 Rules:
 - Gather evidence with search_policies and find_similar_tickets before deciding. Tickets touching multiple topics (e.g. a qualifying life event AND COBRA) need a separate refined search per topic.
+- If your searches return nothing above the similarity floor, that is the answer: the corpus does not cover this ticket. Call escalate_to_human.
 - Before finishing, state in one short paragraph whether the evidence is sufficient. Then call triage_ticket.
-- citations may only contain ids that appeared in your tool results. Never invent citations.
-- If the ticket is out of scope or requires account data you cannot see, call escalate_to_human instead of guessing.
+- Every triage must cite at least one id that appeared in your tool results, and citations may only contain such ids. Never invent citations. If you cannot cite real evidence, escalate instead.
 - Always finish by calling triage_ticket or escalate_to_human. Never end with a prose answer.`;
