@@ -34,7 +34,7 @@ if (process.env.AGENT_ENABLED !== 'false') {
     const { createAgentRuntime } = await import('../agent/dist/src/create-harness.js');
     const { triageRouter } = await import('../agent/dist/src/routes/triage.js');
     agentRuntime = createAgentRuntime();
-    agentRouter = triageRouter((ticketId) => agentRuntime.harnessFor(ticketId));
+    agentRouter = triageRouter(agentRuntime.harness);
   } catch (e) {
     const hint = e.code === 'ERR_MODULE_NOT_FOUND'
       ? 'run `npm run agent:build` to enable POST /api/triage'

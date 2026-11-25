@@ -1,5 +1,6 @@
 import { ContextBudgeter } from "./budgeter.js";
 import type { ToolRegistry } from "./registry.js";
+import { finalResultSchema } from "./tools.js";
 import {
   type AgentEvent,
   type ChatRequest,
@@ -32,6 +33,9 @@ export interface LoopOutcome {
 }
 
 const DEFAULT_MAX_STEPS = 8;
+const MAX_VALIDATION_RETRIES = 3;
+/** A tool name written as prose, e.g. "triage_ticket()" or "call search_policies(...)". */
+const NARRATED_CALL = /\b(triage_ticket|escalate_to_human|search_policies|find_similar_tickets)\s*\(/;
 const DEFAULT_TIMEOUT_MS = 90_000;
 const TEMPERATURE = 0.2;
 /** Deterministic key for loop detection: same tool + semantically identical args. */
@@ -73,7 +77,13 @@ export async function* runLoop(
   const callCounts = new Map<string, number>(); // loop-detection guard
   const totals = { inputTokens: 0, outputTokens: 0 };
   let bareEndTurns = 0;
-  let validationRetries = 0;
+  // One self-correction per step, not one per run: a wrong argument at step 1
+  // should not leave a different tool at step 3 with no slack. A step that
+  // fails validation twice is still unrecoverable, and MAX_VALIDATION_RETRIES
+  // caps the run so a model that keeps guessing argument names cannot burn
+  // every step one correction at a time.
+  let validationRetriesThisStep = 0;
+  let validationRetriesTotal = 0;
 
   const finalize = async function* (
     reason: Exclude<TerminalState, "completed" | "aborted">,
@@ -97,7 +107,20 @@ export async function* runLoop(
       const turn = await provider.chat(finalReq);
       totals.inputTokens += turn.usage.inputTokens;
       totals.outputTokens += turn.usage.outputTokens;
-      result = JSON.parse(turn.text.trim()) as TriageResult;
+      // Validate like a real tool call: this path bypasses the tool schema, so
+      // without it a finalized run can return a category outside the taxonomy
+      // or `escalated` as the string "false". Anything the schema rejects is
+      // not a decision worth recording.
+      const parsed = finalResultSchema.safeParse(JSON.parse(turn.text.trim()));
+      result = parsed.success ? (parsed.data as TriageResult) : undefined;
+      if (!parsed.success) {
+        yield {
+          type: "loop_guard",
+          step: currentStep,
+          tool: "triage_ticket",
+          action: "final_rejected",
+        };
+      }
     } catch {
       result = undefined; // unparseable best-effort -> terminal without result
     }
@@ -122,6 +145,7 @@ export async function* runLoop(
     }
 
     yield { type: "step_started", step };
+    validationRetriesThisStep = 0;
 
     // Assemble context via the budgeter (spec §6 assembly order).
     const assembly = await budgeter.assemble(messages, resultSummaries);
@@ -160,6 +184,12 @@ export async function* runLoop(
       runId,
       stepNo: step,
       modelStopReason: turn.stopReason,
+      // Raw model arguments for now; replaced below with the validated form
+      // for every call that passed. The eval reads citations from this field,
+      // and smaller models send them as a JSON string that coercion fixes — so
+      // persisting the raw text scores a correct answer as a fabricated one.
+      // A call that FAILED validation keeps its raw args: that is the whole
+      // diagnostic for why it failed.
       toolCalls: turn.toolCalls.map((c) => ({ name: c.name, args: c.input })),
       toolResultsSummary: [],
       scratchpad: turn.text,
@@ -169,6 +199,10 @@ export async function* runLoop(
     // ----- No tool calls: the model answered in prose -----
     if (turn.toolCalls.length === 0) {
       bareEndTurns++;
+      // Smaller models often WRITE the call ("triage_ticket()") instead of
+      // emitting one. Naming that specifically corrects it far more reliably
+      // than the generic "do not answer in prose" nudge.
+      const narrated = NARRATED_CALL.exec(turn.text)?.[1];
       if (bareEndTurns >= 2) {
         yield { type: "step_completed", record };
         return yield* finalize("no_terminal_tool");
@@ -180,7 +214,10 @@ export async function* runLoop(
           content: [
             {
               type: "text",
-              text: "Do not answer in prose. Finish by calling triage_ticket (or escalate_to_human if this is out of scope).",
+              text: narrated
+                ? `You wrote "${narrated}()" as text. That is not a tool call and nothing ran. ` +
+                  `Emit an actual ${narrated} tool call with its arguments now.`
+                : "Do not answer in prose. Finish by calling triage_ticket (or escalate_to_human if this is out of scope).",
             },
           ],
         },
@@ -250,6 +287,8 @@ export async function* runLoop(
           summary: res.output.summary,
           isError: false,
         };
+        const idx = turn.toolCalls.indexOf(call);
+        if (idx >= 0) record.toolCalls[idx].args = res.validatedArgs;
         if (registry.isTerminal(call.name)) {
           terminalResult = res.validatedArgs as TriageResult;
         }
@@ -262,8 +301,11 @@ export async function* runLoop(
         yield { type: "tool_result", step, name: call.name, summary: res.error, isError: true };
         if (res.kind === "validation") {
           // Surface once for self-correction; second validation failure is unrecoverable.
-          validationRetries++;
-          if (validationRetries > 1) unrecoverable = true;
+          validationRetriesThisStep++;
+          validationRetriesTotal++;
+          if (validationRetriesThisStep > 1 || validationRetriesTotal > MAX_VALIDATION_RETRIES) {
+            unrecoverable = true;
+          }
           resultBlocks.push({
             type: "tool_result",
             toolUseId: call.id,

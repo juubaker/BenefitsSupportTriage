@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AgentHarness, MemoryRunStore } from "../src/harness.js";
 import { ToolRegistry } from "../src/registry.js";
 import { FakeProvider, type ScriptedTurn } from "../src/testing/fake-provider.js";
+import { buildRegistry, SYSTEM_PROMPT, triageResultSchema } from "../src/tools.js";
 import type { AgentEvent, TriageRequest } from "../src/types.js";
 
 const TICKET: TriageRequest = {
@@ -25,7 +26,8 @@ function buildTestRegistry() {
   registry.register({
     name: "search_policies",
     description: "search",
-    schema: z.object({ query: z.string().min(3), k: z.number().int().default(5) }),
+    // Mirrors the real tool: coercion is part of what these tests exercise.
+    schema: z.object({ query: z.string().min(3), k: z.coerce.number().int().default(5) }),
     handler: async (args) => {
       calls.push({ name: "search_policies", args });
       return {
@@ -37,13 +39,7 @@ function buildTestRegistry() {
   registry.register({
     name: "triage_ticket",
     description: "terminal",
-    schema: z.object({
-      category: z.string(),
-      priority: z.enum(["low", "medium", "high", "urgent"]),
-      summary: z.string(),
-      citations: z.array(z.string()),
-      escalated: z.boolean(),
-    }),
+    schema: triageResultSchema,
     terminal: true,
     handler: async (args) => {
       calls.push({ name: "triage_ticket", args });
@@ -163,5 +159,354 @@ describe("agent loop", () => {
     );
     expect(terminal).toMatchObject({ state: "aborted" });
     expect([...store.runs.values()][0].terminalState).toBe("aborted");
+  });
+});
+
+describe("run totals when the consumer stops at terminal", () => {
+  it("records the step count too, which step_efficiency scores against", async () => {
+    const { registry } = buildTestRegistry();
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: {
+        ollama: new FakeProvider([
+          { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+          { text: "Searching again.", toolCalls: [{ name: "search_policies", input: { query: "qualifying life event", k: 5 } }] },
+          { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+        ]),
+      },
+      defaultProvider: "ollama",
+      registryFor: () => registry,
+      store,
+      systemPrompt: "test system prompt",
+    });
+
+    for await (const event of harness.run(TICKET)) {
+      if (event.type === "terminal") break;
+    }
+
+    const run = [...store.runs.values()][0] as Record<string, unknown>;
+    expect(run.stepCount).toBe(3);
+  });
+
+  it("records token usage even if the generator is disposed early", async () => {
+    // The SSE route breaks out of the for-await on the terminal event, which
+    // disposes the loop generator before its return value — the authoritative
+    // totals — is ever observed. The run row must still be right.
+    const { registry } = buildTestRegistry();
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: {
+        ollama: new FakeProvider([
+          { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+          { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+        ]),
+      },
+      defaultProvider: "ollama",
+      registryFor: () => registry,
+      store,
+      systemPrompt: "test system prompt",
+    });
+
+    for await (const event of harness.run(TICKET)) {
+      if (event.type === "terminal") break;
+    }
+
+    const run = [...store.runs.values()][0] as Record<string, number | string>;
+    expect(run.terminalState).toBe("completed");
+    expect(run.totalInputTokens).toBeGreaterThan(0);
+    expect(run.totalOutputTokens).toBeGreaterThan(0);
+  });
+});
+
+describe("validation retry budget", () => {
+  it("gives each step its own correction, so an early slip doesn't doom a later one", async () => {
+    // The live run spent its single retry on a bad `k` at step 1, leaving none
+    // for a different tool's wrong argument name at step 3, which ended the
+    // run in tool_failure.
+    const { terminal, calls } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: "oops" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "Searching again.", toolCalls: [{ name: "search_policies", input: { q: "wrong field name" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "qualifying life event", k: 5 } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(calls.map((c) => c.name).filter((n) => n === "search_policies")).toHaveLength(2);
+  });
+
+  it("still gives up when the same step fails validation twice", async () => {
+    const { terminal } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { q: "wrong" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "ok now", k: 5 } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "completed" });
+  });
+
+  it("caps corrections across the run so a confused model can't burn every step", async () => {
+    // Distinct wrong arguments each time, so this exercises the validation cap
+    // rather than the repeated-call loop guard (which fires on identical calls).
+    const guessing = (field: string) => ({
+      text: "Guessing.",
+      toolCalls: [{ name: "search_policies", input: { [field]: "spouse coverage" } }],
+    });
+    const { terminal } = await collect([
+      guessing("q"),
+      guessing("search"),
+      guessing("text"),
+      guessing("term"),
+      { text: JSON.stringify(FINAL) }, // finalize()'s tools-disabled best-effort call
+    ]);
+
+    expect(terminal).toMatchObject({ state: "tool_failure" });
+  });
+});
+
+describe("narrated tool calls and finalize validation", () => {
+  it("names the narrated call in the nudge, and the model can recover from it", async () => {
+    // llama3.1 wrote "triage_ticket()" as prose instead of emitting a call.
+    const { terminal, calls, provider } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "Evidence is sufficient.\n\ntriage_ticket()" },
+      { text: "Calling it properly.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    const sent = JSON.stringify(provider.requests);
+    expect(sent).toContain("You wrote");
+    expect(sent).toContain("triage_ticket()");
+    expect(sent).toContain("That is not a tool call and nothing ran");
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(calls.map((c) => c.name)).toEqual(["search_policies", "triage_ticket"]);
+  });
+
+  it("falls back to the generic nudge when the model just wrote prose", async () => {
+    const { provider } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "The spouse may enroll within 31 days." },
+      { text: "Right.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    expect(JSON.stringify(provider.requests)).toContain("Do not answer in prose");
+  });
+
+  it("coerces the loose JSON a finalized run returns", async () => {
+    // The live run finalized with escalated as the string "false".
+    const { terminal } = await collect([
+      { text: "Prose." },
+      { text: "More prose." },
+      { text: JSON.stringify({ ...FINAL, escalated: "false", category: " Enrollment " }) },
+    ]);
+
+    expect(terminal).toMatchObject({
+      state: "no_terminal_tool",
+      result: { escalated: false, category: "enrollment" },
+    });
+  });
+
+  it("discards a finalized result whose category is outside the taxonomy", async () => {
+    // The live run finalized with category "benefits", which does not exist.
+    const { terminal, events } = await collect([
+      { text: "Prose." },
+      { text: "More prose." },
+      { text: JSON.stringify({ ...FINAL, category: "benefits" }) },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "no_terminal_tool" });
+    expect((terminal as { result?: unknown }).result).toBeUndefined();
+    expect(events.some((e) => e.type === "loop_guard" && e.action === "final_rejected")).toBe(true);
+  });
+});
+
+describe("cost accounting", () => {
+  // FakeProvider reports model "fake-model"; price it like a hosted model in
+  // one case and like local inference in the other.
+  const PAID = { "fake-model": { inputPerMTok: 3, outputPerMTok: 15 } };
+  const FREE = { "fake-model": { inputPerMTok: 0, outputPerMTok: 0 } };
+
+  async function runWith(
+    providers: Record<string, FakeProvider>,
+    defaultProvider: string,
+    pricing: Record<string, { inputPerMTok: number; outputPerMTok: number }>,
+  ) {
+    const { registry } = buildTestRegistry();
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: providers as never,
+      defaultProvider: defaultProvider as never,
+      registryFor: () => registry,
+      store,
+      systemPrompt: "test system prompt",
+      pricing,
+    });
+    for await (const event of harness.run(TICKET)) {
+      if (event.type === "terminal") break;
+    }
+    return [...store.runs.values()][0] as Record<string, number>;
+  }
+
+  it("prices a priced model instead of recording zero", async () => {
+    const run = await runWith(
+      {
+        anthropic: new FakeProvider(
+          [
+            { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+            { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+          ],
+          "anthropic",
+        ),
+      },
+      "anthropic",
+      PAID,
+    );
+
+    expect(run.totalInputTokens).toBeGreaterThan(0);
+    expect(run.totalCostUsd).toBeGreaterThan(0);
+  });
+
+  it("records zero for a local model, which genuinely costs nothing", async () => {
+    const run = await runWith(
+      {
+        ollama: new FakeProvider([
+          { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+          { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+        ]),
+      },
+      "ollama",
+      FREE,
+    );
+
+    expect(run.totalInputTokens).toBeGreaterThan(0);
+    expect(run.totalCostUsd).toBe(0);
+  });
+});
+
+describe("persisted tool arguments", () => {
+  it("stores the validated form, so the eval reads ids and not raw JSON text", async () => {
+    // llama3.1 sends citations as a JSON string; coercion fixes the call, but
+    // the eval reads agent_steps.tool_calls, so persisting the raw text scored
+    // a correct answer as a fabricated citation.
+    const { store } = await collect([
+      { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: "5" } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: { ...FINAL, citations: '["chunk-qle-12"]' } }] },
+    ]);
+
+    const steps = [...store.steps];
+    const triage = steps.flatMap((s) => s.toolCalls).find((c) => c.name === "triage_ticket");
+    expect((triage?.args as { citations: string[] }).citations).toEqual(["chunk-qle-12"]);
+
+    const search = steps.flatMap((s) => s.toolCalls).find((c) => c.name === "search_policies");
+    expect((search?.args as { k: number }).k).toBe(5);
+  });
+
+  it("keeps the raw arguments when validation failed, which is the diagnostic", async () => {
+    const { store } = await collect([
+      { text: "Guessing.", toolCalls: [{ name: "search_policies", input: { q: "wrong field" } }] },
+      { text: "Retrying.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+      { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+    ]);
+
+    const failed = [...store.steps][0].toolCalls[0];
+    expect(failed.args).toEqual({ q: "wrong field" });
+  });
+});
+
+describe("escalation after an ungrounded triage is refused", () => {
+  /**
+   * The loop-level counterpart to the registry tests: a rejected triage has to
+   * lead the model somewhere, and the only honest exit when nothing was
+   * retrieved is escalate_to_human. Built against the real buildRegistry so
+   * the grounding check under test is the production one.
+   */
+  async function runOutOfScope(turns: ScriptedTurn[]) {
+    const escalations: Array<{ ticketId: string; reason: string }> = [];
+    const registry = buildRegistry({
+      searchPolicies: async () => [],
+      findSimilarTickets: async () => [],
+      saveTriage: async () => {
+        throw new Error("saveTriage must not be reached for an out-of-scope ticket");
+      },
+      escalate: async (ticketId: string, reason: string) => {
+        escalations.push({ ticketId, reason });
+      },
+    });
+    const store = new MemoryRunStore();
+    const harness = new AgentHarness({
+      providers: { ollama: new FakeProvider(turns) },
+      defaultProvider: "ollama",
+      registryFor: () => registry,
+      store,
+      systemPrompt: SYSTEM_PROMPT,
+    });
+    const events: AgentEvent[] = [];
+    for await (const e of harness.run({
+      ticketId: "oos-01",
+      subject: "Payroll direct deposit",
+      body: "My paycheck went to the wrong bank account. Can you fix my direct deposit?",
+    })) {
+      events.push(e);
+    }
+    return { events, terminal: events.find((e) => e.type === "terminal"), escalations };
+  }
+
+  it("turns a no-evidence triage attempt into an escalation", async () => {
+    const { terminal, escalations } = await runOutOfScope([
+      {
+        text: "Searching.",
+        toolCalls: [{ name: "search_policies", input: { query: "direct deposit wrong account", k: 5 } }],
+      },
+      {
+        text: "Nothing found, but I will categorise it anyway.",
+        toolCalls: [
+          {
+            name: "triage_ticket",
+            input: {
+              category: "plan_administration",
+              priority: "low",
+              summary: "Direct deposit correction.",
+              citations: [],
+              escalated: false,
+            },
+          },
+        ],
+      },
+      {
+        text: "Understood — out of scope.",
+        toolCalls: [
+          {
+            name: "escalate_to_human",
+            input: { ticketId: "oos-01", reason: "Payroll request; outside the benefits policy corpus." },
+          },
+        ],
+      },
+    ]);
+
+    // "completed" means the loop terminated through a terminal tool; which
+    // one it was lives in the tool calls and in triage_results.escalated.
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(escalations).toHaveLength(1);
+    expect(escalations[0].reason).toContain("Payroll");
+  });
+
+  it("lets the agent escalate directly off an empty search, with no refusal needed", async () => {
+    const { terminal, escalations } = await runOutOfScope([
+      {
+        text: "Searching.",
+        toolCalls: [{ name: "search_policies", input: { query: "parking permit garage", k: 5 } }],
+      },
+      {
+        text: "The corpus does not cover this.",
+        toolCalls: [
+          {
+            name: "escalate_to_human",
+            input: { ticketId: "oos-01", reason: "Facilities request; no policy evidence exists." },
+          },
+        ],
+      },
+    ]);
+
+    expect(terminal).toMatchObject({ state: "completed" });
+    expect(escalations).toHaveLength(1);
   });
 });

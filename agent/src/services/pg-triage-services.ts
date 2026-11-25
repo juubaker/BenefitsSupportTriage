@@ -42,16 +42,19 @@ export interface TicketContext {
 export interface PgTriageServicesFactory {
   /**
    * The terminal tools (triage_ticket, escalate_to_human) need to know which
-   * ticket they are finishing, and the tool schemas don't carry it. Bind the
-   * services per run, then build the registry per run:
+   * ticket they are finishing, and the tool schemas don't carry it. The
+   * harness calls registryFor per run, so bind the services there:
    *
-   *   const services = factory.forTicket({ ticketId, runId });
-   *   const harness = new AgentHarness({ registry: buildRegistry(services), ... });
+   *   registryFor: ({ ticketId, runId }) =>
+   *     buildRegistry(services.forTicket({ ticketId, runId }))
    */
   forTicket(ctx: TicketContext): TriageServices;
 }
 
-const DEFAULT_MIN_SIMILARITY = 0.45;
+// Chosen from the retrieval sweep in evals/retrieval_eval.py: 0.65 is the
+// balanced peak on this corpus (recall 0.77, and every out-of-scope case
+// correctly returns nothing). 0.7+ discards a third of real evidence.
+const DEFAULT_MIN_SIMILARITY = 0.65;
 const DEFAULT_MAX_K = 10;
 
 /** Stable, model-visible id for a policy chunk. Citations are checked against these. */

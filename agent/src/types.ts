@@ -66,7 +66,7 @@ export type AgentEvent =
   | { type: "model_delta"; text: string }
   | { type: "tool_call"; step: number; name: string; args: unknown }
   | { type: "tool_result"; step: number; name: string; summary: string; isError: boolean }
-  | { type: "loop_guard"; step: number; tool: string; action: "nudged" | "forcing_final" }
+  | { type: "loop_guard"; step: number; tool: string; action: "nudged" | "forcing_final" | "final_rejected" }
   | { type: "compaction"; step: number; droppedApproxTokens: number }
   | { type: "step_completed"; record: StepRecord }
   | { type: "terminal"; state: TerminalState; result?: TriageResult };

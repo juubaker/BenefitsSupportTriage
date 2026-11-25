@@ -27,7 +27,7 @@ cases:
     bucket: base
     subject: "Add newborn to plan"
     body: "My baby was born last week. How do I add them to my health plan?"
-    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12"] }
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-maternity-02"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 5, min_retrieval_calls: 1 }
     reasoning_rubric: "Identifies birth as a QLE with a special enrollment window and names the proof required."
 

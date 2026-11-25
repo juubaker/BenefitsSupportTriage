@@ -24,10 +24,14 @@ import { AgentTracing, initTracing } from "./tracing.js";
 import { buildRegistry, SYSTEM_PROMPT } from "./tools.js";
 import { createOllamaEmbedder } from "./services/embeddings.js";
 import { createPgTriageServices, type Queryable } from "./services/pg-triage-services.js";
+import { loadPricing } from "./pricing.js";
 
 export interface AgentRuntime {
-  /** A harness bound to one ticket. Build one per request. */
-  harnessFor(ticketId: string): AgentHarness;
+  /**
+   * One harness for the process. The per-run tool registry is built inside
+   * the harness via registryFor, so nothing needs binding per request.
+   */
+  harness: AgentHarness;
   /** Provider names actually configured, for /api/health. */
   providerNames: string[];
   defaultProvider: string;
@@ -41,7 +45,10 @@ export function createAgentRuntime(env: NodeJS.ProcessEnv = process.env): AgentR
   }
 
   const pool = new Pool({ connectionString });
-  const store = new DrizzleRunStore(drizzle(pool));
+  // Without this, every run and every ledger row records a cost of zero,
+  // which is indistinguishable from a genuinely free local run.
+  const pricing = loadPricing(env);
+  const store = new DrizzleRunStore(drizzle(pool), pricing);
   const { providers, defaultProvider } = buildProviders(env);
 
   const services = createPgTriageServices({
@@ -60,16 +67,20 @@ export function createAgentRuntime(env: NodeJS.ProcessEnv = process.env): AgentR
   return {
     providerNames: Object.keys(providers),
     defaultProvider,
-    harnessFor(ticketId: string) {
-      return new AgentHarness({
-        providers,
-        defaultProvider: defaultProvider as never,
-        registry: buildRegistry(services.forTicket({ ticketId })),
-        store,
-        systemPrompt: SYSTEM_PROMPT,
-        tracing,
-      });
-    },
+    harness: new AgentHarness({
+      providers,
+      defaultProvider: defaultProvider as never,
+      // registryFor hands us the runId, which only the harness knows. Binding
+      // the services with it is what populates triage_results.run_id — it was
+      // NULL on every row before, because the composition root had no runId
+      // to pass.
+      registryFor: ({ ticketId, runId }) =>
+        buildRegistry(services.forTicket({ ticketId, runId })),
+      store,
+      systemPrompt: SYSTEM_PROMPT,
+      pricing,
+      tracing,
+    }),
     async close() {
       await shutdownTracing?.();
       await pool.end();

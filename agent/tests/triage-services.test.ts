@@ -5,7 +5,13 @@ import {
   type QueryResult,
 } from "../src/services/pg-triage-services.js";
 import { createOllamaEmbedder, toVectorLiteral } from "../src/services/embeddings.js";
-import { buildRegistry } from "../src/tools.js";
+import {
+  buildRegistry,
+  SYSTEM_PROMPT,
+  CATEGORY_GUIDANCE,
+  TRIAGE_CATEGORIES,
+  TRIAGE_PRIORITIES,
+} from "../src/tools.js";
 
 /** Records every statement and returns canned rows, so no Postgres is needed. */
 function fakeDb(rowsByCall: Array<Array<Record<string, unknown>>> = []): Queryable & {
@@ -161,5 +167,325 @@ describe("createOllamaEmbedder", () => {
     const embedder = createOllamaEmbedder({ fetchImpl });
 
     await expect(embedder("hello")).rejects.toThrow(/Ollama embed failed \(404\)/);
+  });
+});
+
+describe("buildRegistry citation enforcement", () => {
+  const services = (hits: string[] = ["chunk-qle-12"]) => ({
+    searchPolicies: async () => hits.map((id, i) => ({ chunkId: id, text: "…", score: 0.8 - i / 100 })),
+    findSimilarTickets: async () => [{ ticketId: "R-2201", resolution: "…", score: 0.77 }],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  });
+  const ctx = { runId: "run-1", step: 1 };
+  const decision = (citations: string[]) => ({
+    category: "enrollment",
+    priority: "high",
+    summary: "QLE special enrollment.",
+    citations,
+    escalated: false,
+  });
+
+  it("rejects a citation no tool call in this run returned", async () => {
+    const registry = buildRegistry(services());
+    await registry.execute("search_policies", { query: "spouse lost coverage", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision(["chunk-4", "chunk-qle-12"]), ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+    expect(res.error).toContain("chunk-4");
+    expect(res.error).not.toContain("chunk-qle-12, chunk-4");
+  });
+
+  it("accepts citations that were retrieved, across both corpora", async () => {
+    const registry = buildRegistry(services(["chunk-qle-12", "chunk-cobra-04"]));
+    await registry.execute("search_policies", { query: "spouse lost coverage", k: 5 }, ctx);
+    await registry.execute("find_similar_tickets", { description: "spouse laid off", k: 3 }, ctx);
+
+    const res = await registry.execute(
+      "triage_ticket",
+      decision(["chunk-qle-12", "chunk-cobra-04", "R-2201"]),
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("does not let one run's retrieved ids vouch for another run's citations", async () => {
+    const registry = buildRegistry(services());
+    await registry.execute("search_policies", { query: "spouse lost coverage", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision(["chunk-qle-12"]), {
+      runId: "run-2",
+      step: 1,
+    });
+
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects a category outside the taxonomy before the handler runs", async () => {
+    const registry = buildRegistry(services());
+
+    const res = await registry.execute(
+      "triage_ticket",
+      { ...decision([]), category: "benefits-enrollment" },
+      ctx,
+    );
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+  });
+});
+
+describe("tool schemas against what smaller models actually send", () => {
+  const services = {
+    searchPolicies: async () => [{ chunkId: "chunk-qle-12", text: "…", score: 0.8 }],
+    findSimilarTickets: async () => [{ ticketId: "R-2201", resolution: "…", score: 0.77 }],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const ctx = { runId: "run-1", step: 1 };
+
+  it('accepts k as a string, which llama3.1 sends ("10" not 10)', async () => {
+    const res = await buildRegistry(services).execute(
+      "search_policies",
+      { query: "spouse added mid-year", k: "10" },
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts query on find_similar_tickets, not just description", async () => {
+    const registry = buildRegistry(services);
+
+    const withQuery = await registry.execute(
+      "find_similar_tickets",
+      { query: "spouse added mid-year", k: 3 },
+      ctx,
+    );
+    const withDescription = await registry.execute(
+      "find_similar_tickets",
+      { description: "spouse added mid-year", k: 3 },
+      ctx,
+    );
+
+    expect(withQuery.ok).toBe(true);
+    expect(withDescription.ok).toBe(true);
+  });
+
+  it("still rejects a find_similar_tickets call with neither", async () => {
+    const res = await buildRegistry(services).execute("find_similar_tickets", { k: 3 }, ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+  });
+
+  it("exposes every tool as JSON schema for the model", () => {
+    // A transform in a tool schema throws here rather than at registration,
+    // so this guards the whole registry, not just the tool under test.
+    expect(() => buildRegistry(services).specs()).not.toThrow();
+  });
+});
+
+describe("triage_ticket accepts what the model sent at step 4 of the live run", () => {
+  const services = {
+    searchPolicies: async () => [{ chunkId: "chunk-qle-12", text: "…", score: 0.69 }],
+    findSimilarTickets: async () => [],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const ctx = { runId: "run-1", step: 1 };
+  const base = {
+    category: "eligibility",
+    priority: "medium",
+    summary: "Spouse can be added mid-year after job loss.",
+  };
+
+  async function submit(extra: Record<string, unknown>) {
+    const registry = buildRegistry(services);
+    await registry.execute("search_policies", { query: "spouse job loss", k: 5 }, ctx);
+    return registry.execute("triage_ticket", { ...base, ...extra }, ctx);
+  }
+
+  it('accepts citations as a JSON-encoded array string', async () => {
+    const res = await submit({ citations: '["chunk-qle-12"]', escalated: false });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.validatedArgs).toMatchObject({ citations: ["chunk-qle-12"] });
+  });
+
+  it('accepts escalated as the string "False"', async () => {
+    const res = await submit({ citations: ["chunk-qle-12"], escalated: "False" });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.validatedArgs).toMatchObject({ escalated: false });
+  });
+
+  it("accepts a comma-separated citation list", async () => {
+    const res = await submit({ citations: "chunk-qle-12", escalated: false });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.validatedArgs).toMatchObject({ citations: ["chunk-qle-12"] });
+  });
+
+  it("still enforces grounding on coerced citations", async () => {
+    const res = await submit({ citations: '["chunk-4"]', escalated: false });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toContain("chunk-4");
+  });
+
+  it('still rejects escalated: "true" on the non-escalation tool', async () => {
+    const res = await submit({ citations: ["chunk-qle-12"], escalated: "true" });
+
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe("taxonomy guidance in the tool schema", () => {
+  const services = {
+    searchPolicies: async () => [],
+    findSimilarTickets: async () => [],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const spec = () =>
+    buildRegistry(services)
+      .specs()
+      .find((s) => s.name === "triage_ticket") as unknown as {
+      inputSchema: { properties: Record<string, { description?: string }> };
+    };
+
+  it("sends a definition for every category the enum accepts", () => {
+    const description = spec().inputSchema.properties.category.description ?? "";
+
+    for (const category of TRIAGE_CATEGORIES) {
+      expect(description).toContain(`${category} — `);
+    }
+  });
+
+  it("states the enrollment/eligibility boundary that the live runs got wrong", () => {
+    const description = spec().inputSchema.properties.category.description ?? "";
+
+    expect(description).toContain("add my spouse mid-year");
+    expect(description).toMatch(/enrollment is an ACTION/);
+    expect(description).toMatch(/eligibility is whether someone QUALIFIES/);
+  });
+
+  it("gives each priority level a rule rather than a bare word", () => {
+    const description = spec().inputSchema.properties.priority.description ?? "";
+
+    for (const level of TRIAGE_PRIORITIES) {
+      expect(description).toContain(`${level}:`);
+    }
+    expect(description).toContain("31-day window");
+  });
+
+  it("keeps the guidance and the enum in step", () => {
+    expect(Object.keys(CATEGORY_GUIDANCE).sort()).toEqual([...TRIAGE_CATEGORIES].sort());
+  });
+});
+
+describe("an ungrounded triage is rejected in favour of escalation", () => {
+  const emptyCorpus = {
+    searchPolicies: async () => [],
+    findSimilarTickets: async () => [],
+    saveTriage: async () => {},
+    escalate: async () => {},
+  };
+  const withEvidence = {
+    ...emptyCorpus,
+    searchPolicies: async () => [{ chunkId: "chunk-qle-12", text: "…", score: 0.78 }],
+  };
+  const ctx = { runId: "run-1", step: 1 };
+  const decision = (citations: string[]) => ({
+    category: "enrollment",
+    priority: "low",
+    summary: "Payroll direct deposit correction.",
+    citations,
+    escalated: false,
+  });
+
+  it("refuses a triage that cites nothing and names escalation as the alternative", async () => {
+    // oos-01: the agent answered "enrollment/low" for a payroll question with
+    // no citations at all, rather than escalating.
+    const registry = buildRegistry(emptyCorpus);
+    await registry.execute("search_policies", { query: "direct deposit wrong account", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision([]), ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.kind).toBe("validation");
+    expect(res.error).toContain("escalate_to_human");
+    expect(res.error).toMatch(/no search in this run returned any/);
+  });
+
+  it("lists the available ids when searches did return evidence the model ignored", async () => {
+    const registry = buildRegistry(withEvidence);
+    await registry.execute("search_policies", { query: "spouse mid-year", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision([]), ctx);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toContain("chunk-qle-12");
+    expect(res.error).toContain("escalate_to_human");
+  });
+
+  it("still accepts a triage that cites retrieved evidence", async () => {
+    const registry = buildRegistry(withEvidence);
+    await registry.execute("search_policies", { query: "spouse mid-year", k: 5 }, ctx);
+
+    const res = await registry.execute("triage_ticket", decision(["chunk-qle-12"]), ctx);
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("leaves escalate_to_human reachable with no evidence at all", async () => {
+    // The whole point: when nothing was retrieved, escalation is the only exit.
+    const registry = buildRegistry(emptyCorpus);
+    await registry.execute("search_policies", { query: "parking permit", k: 5 }, ctx);
+
+    const res = await registry.execute(
+      "escalate_to_human",
+      { ticketId: "oos-05", reason: "Facilities request; outside the benefits policy corpus." },
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("reports an empty policy search as absence of coverage, not a neutral zero", async () => {
+    const registry = buildRegistry(emptyCorpus);
+
+    const res = await registry.execute("search_policies", { query: "reset my password", k: 5 }, ctx);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.output.summary).toMatch(/no policy passage above the similarity floor/);
+    expect(res.output.summary).toContain("escalate_to_human");
+  });
+});
+
+describe("the system prompt states where scope ends", () => {
+  it("names the out-of-scope areas the golden set expects to be escalated", () => {
+    for (const subject of ["direct deposit", "PTO", "passwords", "Performance", "parking"]) {
+      expect(SYSTEM_PROMPT).toContain(subject);
+    }
+  });
+
+  it("tells the agent that an underspecified ticket escalates", () => {
+    expect(SYSTEM_PROMPT).toMatch(/am I covered\?/);
+    expect(SYSTEM_PROMPT).toMatch(/Urgency in the ticket is not evidence/);
   });
 });

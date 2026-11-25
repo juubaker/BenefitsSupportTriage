@@ -36,7 +36,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://triage:triage@localhost:5433/triage")
 THRESHOLDS = [round(0.50 + 0.025 * i, 3) for i in range(13)]  # 0.500 .. 0.800
-SERVER_THRESHOLD = 0.7  # search_policies default min_similarity
+SERVER_THRESHOLD = 0.65  # search_policies default min_similarity
 
 
 @dataclass
