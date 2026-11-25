@@ -24,3 +24,4 @@ dist/
 
 agent/node_modules/
 agent/dist/
+evals/eval/
