@@ -150,7 +150,12 @@ def test_scorecard_aggregates_by_metric_and_bucket():
     assert card["case_pass_rate"] == 0.5
     assert card["by_metric"]["loop_discipline"]["rate"] == 0.5
     assert card["by_bucket"]["out_of_scope"]["rate"] == 0.0
-    assert card["failures"] == [{"case_id": "oos-01", "failed": ["loop_discipline"]}]
+    assert card["failures"] == [
+        {
+            "case_id": "oos-01",
+            "failed": [{"metric": "loop_discipline", "score": 0.0, "detail": ""}],
+        }
+    ]
 
 
 # ---------------- outcome metrics ----------------
