@@ -19,9 +19,37 @@
  *   cd agent && npx tsx scripts/provider-check.ts
  */
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { buildProviders } from "../src/providers/index.js";
 import { formatError } from "../src/describe-error.js";
 import type { ProviderAdapter, ToolSpec } from "../src/types.js";
+
+/**
+ * Load the same .env the server reads.
+ *
+ * server/index.js does `import 'dotenv/config'`, which resolves .env relative
+ * to the process cwd — the repo root, where the server starts. Nothing under
+ * agent/ loads it, so a script run from agent/ sees a bare environment and
+ * reports every key as missing. The first run of this script said
+ * ANTHROPIC_API_KEY was not set on a machine where the server had it.
+ *
+ * Checks cwd first so `npm run provider-check` from the repo root behaves the
+ * same as from agent/.
+ */
+function loadEnvFile(): string {
+  for (const dir of [process.cwd(), join(process.cwd(), "..")]) {
+    const path = join(dir, ".env");
+    if (!existsSync(path)) continue;
+    try {
+      process.loadEnvFile(path);
+      return path;
+    } catch (err) {
+      return `${path} (failed to parse: ${formatError(err)})`;
+    }
+  }
+  return "none found — reading the ambient environment only";
+}
 
 // A single tool so the call exercises the same path a real step does: a
 // provider can answer plain text and still reject a tool schema.
@@ -68,26 +96,37 @@ async function probe(provider: ProviderAdapter): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const envFile = loadEnvFile();
   const { providers, defaultProvider } = buildProviders();
   const names = Object.keys(providers);
+  console.log(`env file:             ${envFile}`);
   console.log(`configured providers: ${names.join(", ")}`);
   console.log(`default provider:     ${defaultProvider}`);
   console.log(
     `ANTHROPIC_API_KEY:    ${
       process.env.ANTHROPIC_API_KEY
         ? `set (${process.env.ANTHROPIC_API_KEY.length} chars, ends ...${process.env.ANTHROPIC_API_KEY.slice(-4)})`
-        : "NOT SET — the anthropic provider will not be built at all"
+        : "NOT SET — the anthropic provider is not built at all, so a run " +
+          "starts on ollama rather than failing over to it"
     }`,
   );
+  console.log(`ANTHROPIC_MODEL:      ${process.env.ANTHROPIC_MODEL ?? "(default) claude-sonnet-4-6"}`);
   console.log("");
 
   for (const provider of Object.values(providers)) {
     if (provider) await probe(provider);
   }
 
+  // The closing note only makes sense once anthropic is actually in the map;
+  // printing it regardless invites reading "no anthropic provider" as the
+  // cause of a failover that could not have happened without one.
   console.log(
-    "\nIf anthropic FAILs here, the server's failover to ollama is working as designed —\n" +
-      "the line above is the reason it has been firing on every run.",
+    providers.anthropic
+      ? "\nIf anthropic FAILs here, the server's failover to ollama is working as designed —\n" +
+          "the line above is the reason it has been firing on every run."
+      : "\nanthropic was not configured, so this run could not reproduce a failover.\n" +
+          "A run that starts on anthropic and restarts on ollama proves the key WAS present,\n" +
+          "so check that this script read the same .env the server does (see 'env file' above).",
   );
 }
 
