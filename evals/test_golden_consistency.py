@@ -103,3 +103,44 @@ def test_escalation_cases_declare_no_expected_outcome():
         and (c.outcome.category is not None or c.outcome.priority is not None)
     }
     assert not offenders, f"escalation cases with an expected outcome: {offenders}"
+
+
+def _priority_guidance() -> str:
+    src = TOOLS_TS.read_text()
+    m = re.search(r"const PRIORITY_GUIDANCE = \[(.*?)\]\.join", src, re.S)
+    if not m:
+        pytest.skip("PRIORITY_GUIDANCE not found — moved?")
+    return " ".join(re.findall(r'"([^"]*)"', m.group(1)))
+
+
+def test_the_priority_examples_do_not_contradict_the_definitions():
+    """A factual lookup cannot be a medium example.
+
+    medium used to list "out-of-network costs" and "a disability waiting
+    period". Both are plain questions about how the plan works, which is what
+    low describes — and base-13 and base-08 ask them verbatim. The dataset was
+    labelled from the examples and the agent answered from the definitions, so
+    those two cases failed every nightly run for a contradiction in the prompt.
+    """
+    guidance = _priority_guidance()
+    retired = ["out-of-network costs", "a disability waiting period"]
+    back = [p for p in retired if p in guidance]
+    assert not back, (
+        f"these examples describe factual lookups but sit under medium: {back}. "
+        "If medium really should cover them, change low's definition too and "
+        "relabel base-08/base-13 — do not leave the two disagreeing."
+    )
+
+
+def test_the_low_medium_discriminator_is_stated_not_implied():
+    # The split was decidable only by reading both definitions closely and
+    # guessing which example list to trust. It should be said outright.
+    guidance = _priority_guidance().lower()
+    assert "how the plan works in general" in guidance
+    assert "own circumstances are in play" in guidance
+
+
+def test_high_names_the_new_hire_window():
+    # multihop-04 is a new hire inside a 31-day window and was labelled medium.
+    # The window belongs in the high examples so the case is decidable.
+    assert "new hire" in _priority_guidance().lower()
