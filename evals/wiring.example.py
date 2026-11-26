@@ -12,6 +12,7 @@ import psycopg  # type: ignore
 import requests  # type: ignore
 
 from judge_client import make_judge_call
+from trajectory_io import load_scratch_and_final
 from trajectory_judge import default_judge_config
 from run import RunnerDeps
 
@@ -47,22 +48,6 @@ def _trigger_run(payload: dict, traceparent: str) -> str:
     return run_id
 
 
-def _load_scratch_and_final(conn, run_id: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT scratchpad, tool_calls FROM agent_steps WHERE run_id=%s ORDER BY step_no",
-            (run_id,),
-        )
-        rows = cur.fetchall()
-    scratch = "\n".join(r[0] for r in rows if r[0])
-    final = {}
-    for _s, calls in rows:
-        for c in (calls or []):
-            if c.get("name") == "triage_ticket":
-                final = c.get("args", {})
-    return scratch, final
-
-
 def build_runner_deps(with_judge: bool) -> RunnerDeps:
     conn = psycopg.connect(DB_URL)
     return RunnerDeps(
@@ -73,5 +58,5 @@ def build_runner_deps(with_judge: bool) -> RunnerDeps:
         # must differ from the worker's, which JudgeConfig.validate() enforces.
         judge_call=make_judge_call() if with_judge else None,
         judge_cfg=default_judge_config() if with_judge else None,
-        load_scratch_and_final=(lambda rid: _load_scratch_and_final(conn, rid)) if with_judge else None,
+        load_scratch_and_final=(lambda rid: load_scratch_and_final(conn, rid)) if with_judge else None,
     )
