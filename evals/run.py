@@ -3,6 +3,14 @@
   python -m eval.run --suite smoke     # PR gate: deterministic only, exit 1 on regression
   python -m eval.run --suite nightly   # full 40 + judge metrics, writes scorecard
 
+  python -m eval.run --suite nightly --provider anthropic   # pin the model under test
+
+The scorecard records which provider actually generated the tokens, and the
+gate fails on a silent fallback. Both exist because every scorecard produced
+before this read as a Claude result and was in fact llama3.1: the server failed
+over on its first API call and the runner never asked what answered. Pass
+--allow-failover only when a mixed-provider scorecard is genuinely wanted.
+
 Flow per case: trigger a real agent run via the harness HTTP endpoint (originating
 a W3C traceparent so the run's spans link back here), read the persisted RunData,
 score it, persist eval_results rows, and aggregate a scorecard. The scorecard is
@@ -29,6 +37,36 @@ class CaseScore:
     run_id: str
     metrics: list[dict]
     passed: bool
+    # What the run asked for vs what actually generated the tokens. Defaulted
+    # so existing callers and tests keep working; filled by execute_suite.
+    requested_provider: str = ""
+    observed_providers: tuple[str, ...] = ()
+
+
+def observed_providers(conn, run_id: str) -> tuple[str, str, tuple[str, ...]]:
+    """What provider was asked for, and what actually did the work.
+
+    agent_runs.provider is set once at createRun and never updated, so after a
+    failover the run row still says "anthropic" while every step was generated
+    by the fallback. token_ledger carries the provider per step, which is the
+    authoritative record. Returns (requested, requested_model, observed).
+
+    This is why the whole 42-case suite has been scoring llama3.1 while the
+    scorecard said nothing: the runner never asked which model answered.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT r.provider, r.model, "
+            "       array_remove(array_agg(DISTINCT l.provider), NULL) "
+            "FROM agent_runs r LEFT JOIN token_ledger l ON l.run_id = r.id "
+            "WHERE r.id = %s GROUP BY r.id, r.provider, r.model",
+            (run_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return "", "", ()
+    requested, model, observed = row
+    return requested or "", model or "", tuple(sorted(observed or ()))
 
 
 def _traceparent(trace_id: str, span_id: str) -> str:
@@ -39,10 +77,13 @@ def run_case(case: GoldenCase, deps: "RunnerDeps") -> tuple[str, list[MetricResu
     """Execute one agent run and score it. Returns (run_id, results)."""
     trace_id = uuid.uuid4().hex  # 32 hex chars
     span_id = uuid.uuid4().hex[:16]
-    run_id = deps.trigger_run(
-        {"ticketId": case.id, "subject": case.subject, "body": case.body},
-        traceparent=_traceparent(trace_id, span_id),
-    )
+    payload = {"ticketId": case.id, "subject": case.subject, "body": case.body}
+    # Pinning is not just bookkeeping: the harness only fails over when the
+    # caller left the provider unset, so a pinned run surfaces a provider
+    # error as a failed run instead of quietly scoring the fallback.
+    if getattr(deps, "provider", None):
+        payload["provider"] = deps.provider
+    run_id = deps.trigger_run(payload, traceparent=_traceparent(trace_id, span_id))
     run = load_run_data(deps.conn, run_id)
     results = score_deterministic(case, run)
 
@@ -95,6 +136,20 @@ def build_scorecard(scores: list[CaseScore], suite: str) -> dict:
             for s in scores
             if not s.passed
         ],
+        # A scorecard that does not name the model it measured is not evidence
+        # of anything. "failed_over" lists the cases whose tokens came from a
+        # provider other than the one requested.
+        "providers": {
+            "requested": sorted({s.requested_provider for s in scores if s.requested_provider}),
+            "observed": sorted({p for s in scores for p in s.observed_providers}),
+            "failed_over": [
+                s.case_id
+                for s in scores
+                if s.requested_provider
+                and s.observed_providers
+                and set(s.observed_providers) != {s.requested_provider}
+            ],
+        },
     }
 
 
@@ -106,6 +161,9 @@ class RunnerDeps:
     judge_call: object = None
     judge_cfg: object = None
     load_scratch_and_final: object = None
+    # Set by main() from --provider; wiring.py does not need to know about it,
+    # since the payload passes straight through to POST /api/triage.
+    provider: str | None = None
 
 
 def execute_suite(suite: Suite, deps: RunnerDeps, golden_dir: str | None = None) -> dict:
@@ -117,6 +175,7 @@ def execute_suite(suite: Suite, deps: RunnerDeps, golden_dir: str | None = None)
         run_id, results = run_case(case, deps)
         persist_results(deps.conn, run_id, suite.value, case.id, results, judge_model)
         case_passed = all(r.passed for r in results)
+        requested, _model, observed = observed_providers(deps.conn, run_id)
         scores.append(
             CaseScore(
                 case_id=case.id,
@@ -124,6 +183,8 @@ def execute_suite(suite: Suite, deps: RunnerDeps, golden_dir: str | None = None)
                 run_id=run_id,
                 metrics=[asdict(r) for r in results],
                 passed=case_passed,
+                requested_provider=requested,
+                observed_providers=observed,
             )
         )
     return build_scorecard(scores, suite.value)
@@ -135,6 +196,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default="eval/scorecards/latest.json")
     parser.add_argument("--min-pass-rate", type=float, default=1.0,
                         help="fail the process if case pass rate drops below this")
+    parser.add_argument("--provider", choices=["anthropic", "ollama"], default=None,
+                        help="pin every run to this provider instead of taking the server "
+                             "default. A pinned run does not fail over, so a provider error "
+                             "fails the case rather than being scored on the fallback.")
+    parser.add_argument("--allow-failover", action="store_true",
+                        help="score a suite whose runs fell back to another provider. "
+                             "Off by default: a mixed-provider scorecard measures nothing, "
+                             "and a silent fallback is how 42 cases came to be scored on "
+                             "llama3.1 while the scorecard read as a Claude result.")
     args = parser.parse_args(argv)
     suite = Suite(args.suite)
 
@@ -144,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
     from wiring import build_runner_deps  # type: ignore
 
     deps = build_runner_deps(with_judge=(suite is Suite.NIGHTLY))
+    # Assigned rather than passed, so an existing wiring.py keeps its signature.
+    deps.provider = args.provider
     scorecard = execute_suite(suite, deps)
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -151,11 +223,29 @@ def main(argv: list[str] | None = None) -> int:
         json.dump(scorecard, f, indent=2, sort_keys=True)
 
     print(json.dumps(scorecard, indent=2))
+
+    # Checked before the pass rate: a suite that ran on the wrong model has no
+    # pass rate worth reporting, whichever way it came out.
+    failed_over = scorecard["providers"]["failed_over"]
+    if failed_over and not args.allow_failover:
+        print(
+            f"\nGATE FAILED: {len(failed_over)} of {scorecard['cases']} cases fell back from "
+            f"{scorecard['providers']['requested']} to another provider "
+            f"(observed: {scorecard['providers']['observed']}).\n"
+            f"First affected: {', '.join(failed_over[:5])}\n"
+            "The server log and the provider_failover event carry the reason; "
+            "`cd agent && npm run provider-check` reproduces it directly.\n"
+            "Re-run with --allow-failover only if a mixed-provider scorecard is what you want.",
+            file=sys.stderr,
+        )
+        return 1
+
     rate = scorecard["case_pass_rate"]
     if rate < args.min_pass_rate:
         print(f"\nGATE FAILED: pass rate {rate} < {args.min_pass_rate}", file=sys.stderr)
         return 1
-    print(f"\nGATE PASSED: pass rate {rate} >= {args.min_pass_rate}")
+    observed = scorecard["providers"]["observed"] or ["unknown"]
+    print(f"\nGATE PASSED: pass rate {rate} >= {args.min_pass_rate} on {', '.join(observed)}")
     return 0
 
 

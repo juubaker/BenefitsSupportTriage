@@ -11,7 +11,7 @@ from cases import Bucket, Suite, load_cases, load_suite, SMOKE_IDS
 from trajectory_judge import JudgeConfig, reasoning_quality
 from metrics import RunData, score_deterministic
 from trajectory_judge import _extract_ids
-from run import build_scorecard, CaseScore
+from run import build_scorecard, CaseScore, observed_providers
 
 
 def case_by_id(cid: str):
@@ -252,3 +252,83 @@ def test_serial_id_fallback_is_recovered_too():
     assert _extract_ids("search_policies(\"q\") -> 1 chunks [chunk-312], top score 0.6") == {
         "chunk-312"
     }
+
+
+# ---------------- provider provenance ----------------
+
+class _FakeCursor:
+    def __init__(self, row):
+        self._row = row
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def execute(self, *a, **k):
+        pass
+    def fetchone(self):
+        return self._row
+
+
+class _FakeConn:
+    def __init__(self, row):
+        self._row = row
+    def cursor(self):
+        return _FakeCursor(self._row)
+
+
+def _score(cid, requested, observed, passed=True):
+    return CaseScore(
+        cid, "base", f"r-{cid}",
+        [{"metric": "loop_discipline", "score": 1.0, "passed": passed, "detail": ""}],
+        passed, requested_provider=requested, observed_providers=observed,
+    )
+
+
+def test_observed_providers_reads_the_ledger_not_the_run_row():
+    # agent_runs.provider is the request; token_ledger.provider is what ran.
+    conn = _FakeConn(("anthropic", "claude-sonnet-4-6", ["ollama"]))
+    assert observed_providers(conn, "r1") == ("anthropic", "claude-sonnet-4-6", ("ollama",))
+
+
+def test_observed_providers_tolerates_a_run_with_no_ledger_rows():
+    # A run that died before its first step has nothing in the ledger. That is
+    # not a failover, so it must not be reported as one.
+    conn = _FakeConn(("anthropic", "claude-sonnet-4-6", []))
+    assert observed_providers(conn, "r1") == ("anthropic", "claude-sonnet-4-6", ())
+
+
+def test_observed_providers_on_a_missing_run():
+    assert observed_providers(_FakeConn(None), "nope") == ("", "", ())
+
+
+def test_scorecard_names_the_provider_that_produced_it():
+    card = build_scorecard([_score("base-01", "anthropic", ("anthropic",))], "smoke")
+    assert card["providers"]["requested"] == ["anthropic"]
+    assert card["providers"]["observed"] == ["anthropic"]
+    assert card["providers"]["failed_over"] == []
+
+
+def test_scorecard_flags_a_case_that_fell_back():
+    # The failure mode this exists for: every case passes, on the wrong model.
+    card = build_scorecard(
+        [
+            _score("base-01", "anthropic", ("ollama",)),
+            _score("base-02", "anthropic", ("anthropic",)),
+        ],
+        "smoke",
+    )
+    assert card["case_pass_rate"] == 1.0
+    assert card["providers"]["failed_over"] == ["base-01"]
+    assert card["providers"]["observed"] == ["anthropic", "ollama"]
+
+
+def test_a_run_spanning_both_providers_counts_as_a_failover():
+    # A mid-run failover leaves ledger rows from both, which is still not a
+    # measurement of the requested provider.
+    card = build_scorecard([_score("base-01", "anthropic", ("anthropic", "ollama"))], "smoke")
+    assert card["providers"]["failed_over"] == ["base-01"]
+
+
+def test_no_ledger_rows_is_not_reported_as_a_failover():
+    card = build_scorecard([_score("base-01", "anthropic", ())], "smoke")
+    assert card["providers"]["failed_over"] == []
