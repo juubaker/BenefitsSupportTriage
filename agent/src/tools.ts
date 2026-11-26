@@ -94,6 +94,7 @@ const CATEGORY_BOUNDARIES = [
  */
 const PRIORITY_GUIDANCE = [
   "Decide priority by whose situation is in play, then by whether the clock is running.",
+  "Judge that by what the ticket is about, not by the form of the question. A tier, copay or coverage question is low when it is asked in the abstract and medium when the employee is weighing a choice or is already affected by it — the same words can be either, so read what they say about themselves.",
   "low: the question is about how the plan works in general, not about anything happening to this employee now. Nothing for them to decide and no deadline (a copay amount, an annual maximum, a match formula, a waiting period, whether a plan covers a category of care, when a window opens).",
   "medium: this employee's own circumstances are in play — they are weighing an option, or something has happened to them that the answer bears on — but nothing expires if they wait (choosing between two plans they are eligible for, what a claim they have already filed will pay, how a change they have made affects their paycheck).",
   "high: a deadline is running or coverage is at risk, so delay costs the employee an option — a qualifying life event and its 31-day window, a new hire's enrollment window, a dependent aging off, job loss, a newborn.",

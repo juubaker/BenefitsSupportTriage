@@ -144,3 +144,19 @@ def test_high_names_the_new_hire_window():
     # multihop-04 is a new hire inside a 31-day window and was labelled medium.
     # The window belongs in the high examples so the case is decidable.
     assert "new hire" in _priority_guidance().lower()
+
+
+def test_the_rubric_warns_that_form_is_not_the_test():
+    """budget-03 is the case this exists for.
+
+    Its surface question is "which copay tiers do these fall into", which the
+    low examples describe; its context is "before open enrollment so I can pick
+    the right plan" and "I am on a generic maintenance drug ... a specialty
+    injectable", which makes it medium. The agent matched the form and answered
+    low. The same words can sit in either band, so the rubric has to say that
+    outright rather than leave it to the examples — the mistake the retired
+    medium examples made in the other direction.
+    """
+    guidance = _priority_guidance().lower()
+    assert "not by the form of the question" in guidance
+    assert "the same words can be either" in guidance
