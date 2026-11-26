@@ -60,7 +60,7 @@ jobs:
       # for your repo (db:migrate, seed, start), so CI stays green meanwhile.
       # - name: eval smoke gate (deterministic, 10 cases)
       #   working-directory: evals
-      #   run: cp wiring.example.py wiring.py && python -m run --suite smoke --min-pass-rate 0.9
+      #   run: cp wiring.example.py wiring.py && python -m run --suite smoke --provider anthropic --min-pass-rate 1.0
 
   # Full 40 cases + judge metrics, nightly and on release tags.
   nightly:
@@ -98,4 +98,4 @@ jobs:
       # start + db:migrate for your repo, then uncomment.
       # - name: eval nightly (full 40 + judge)
       #   working-directory: evals
-      #   run: cp wiring.example.py wiring.py && python -m run --suite nightly --min-pass-rate 0.85 --out scorecards/nightly.json
+      #   run: cp wiring.example.py wiring.py && python -m run --suite nightly --provider anthropic --min-pass-rate 0.95 --out scorecards/nightly.json

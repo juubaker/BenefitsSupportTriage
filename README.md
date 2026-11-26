@@ -13,9 +13,11 @@ and triage to any MCP host (Claude Desktop, Claude Code, Cursor). Underneath
 both runs the v2 agent: a bounded tool-use loop with token budgeting, a per-run
 tool registry and OpenTelemetry tracing, serving `POST /api/triage`.
 
-It passes all 40 golden cases on `claude-sonnet-4-6`, every metric at 1.0, with
-the scorecard recording which provider actually generated the tokens. See
-[Evaluation](#evaluation) for what that measures and what it does not.
+On `claude-sonnet-4-6` it scores 39–40 of the 40 golden cases, with every
+retrieval, loop and escalation metric at 1.0 and one case sitting on a
+priority boundary. The scorecard records which provider actually generated the
+tokens. See [Evaluation](#evaluation) for what that measures and what it does
+not.
 
 ## Architecture
 
@@ -235,7 +237,8 @@ database started in CI first.
 
 ## Evaluation
 
-Full nightly suite on `claude-sonnet-4-6`, pinned with `--provider anthropic`:
+Full nightly suite on `claude-sonnet-4-6`, pinned with `--provider anthropic`.
+Repeated runs land at 39–40 of 40 in about ten minutes:
 
 | Metric | Rate |
 |---|---|
@@ -243,14 +246,23 @@ Full nightly suite on `claude-sonnet-4-6`, pinned with `--provider anthropic`:
 | grounding_recall | 1.00 |
 | loop_discipline | 1.00 |
 | min_retrieval | 1.00 |
-| outcome_correctness | 1.00 |
-| reasoning_quality (judge) | 1.00 |
 | retrieval_grounding | 1.00 |
 | step_efficiency | 1.00 |
 | token_budget_adherence | 1.00 |
 | tool_choice_correctness | 1.00 |
+| reasoning_quality (judge) | 1.00 |
+| outcome_correctness | 0.975–1.00 |
 
-40/40 cases, all five buckets at 1.0, `failed_over: []`. Ten minutes end to end.
+Nine metrics hold at 1.0 across runs. `outcome_correctness` is the one that
+moves, and it moves on a single case: **budget-03** asks which pharmacy tiers
+three named drugs fall into, in a ticket framed as choosing a plan during open
+enrollment. The tier question reads `low` and the framing reads `medium`; the
+agent has answered each about half the time. The label is `medium` and is
+correct — the fix belongs in how the rubric distinguishes a lookup from a
+decision, not in the label.
+
+So `--min-pass-rate 0.95` is the honest nightly gate. Smoke is
+deterministic-only and holds 1.0.
 
 **What the number rests on.** Every scorecard records the provider that
 actually generated the tokens, read from `token_ledger` rather than from
@@ -270,13 +282,15 @@ where there is no labelled ground truth, by measuring the score distribution.
 Both floors landed on 0.60 from independent measurements, and the comments in
 `agent/src/services/pg-triage-services.ts` carry the numbers.
 
-**What it does not show.** One run. Three cases have flickered between runs
-near a decision boundary, so this is a result rather than an established
-baseline until a second clean run reproduces it. `reasoning_quality` comes
-from a local llama3.1 judge — a different model family from the worker, which
-is the constraint that matters, and free, but the noisiest metric in the set.
-No golden case requires `find_similar_tickets`, so the precedent path works and
-is cited in live runs but is not measured by the gate.
+**What it does not show.** `reasoning_quality` comes from a local llama3.1
+judge — a different model family from the worker, which is the constraint that
+matters, and free, but not a strong judge. No golden case requires
+`find_similar_tickets`, so the precedent path works and is cited in live runs
+but is not measured by the gate. And a suite is 40 model calls plus 40 judge
+calls over ten minutes: three separate runs degraded partway through before
+provider retries were added, with cut streams surfacing as cases that reached
+no decision. That is absorbed now, but the suite has no pacing, so a tighter
+rate limit would show up the same way.
 
 ## Status
 
