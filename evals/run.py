@@ -195,8 +195,19 @@ def build_scorecard(scores: list[CaseScore], suite: str) -> dict:
         "by_bucket": {
             k: {**v, "rate": round(v["pass"] / v["total"], 3)} for k, v in sorted(by_bucket.items())
         },
+        # The detail string, not just the metric name: a scorecard that says
+        # "outcome_correctness failed" and nothing else sends you to the DB to
+        # find out what the run actually decided. MetricResult already carries
+        # the explanation; it was being dropped on the way out.
         "failures": [
-            {"case_id": s.case_id, "failed": [m["metric"] for m in s.metrics if not m["passed"]]}
+            {
+                "case_id": s.case_id,
+                "failed": [
+                    {"metric": m["metric"], "score": m["score"], "detail": m["detail"]}
+                    for m in s.metrics
+                    if not m["passed"]
+                ],
+            }
             for s in scores
             if not s.passed
         ],

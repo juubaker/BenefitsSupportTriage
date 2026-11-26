@@ -32,7 +32,29 @@ export interface EvalScorecard {
   case_pass_rate: number;
   by_metric: Record<string, ScoreEntry>;
   by_bucket: Record<string, ScoreEntry>;
-  failures: Array<{ case_id: string; failed: string[] }>;
+  /**
+   * `failed` carries each metric's explanation, not just its name. Older
+   * scorecards wrote a bare string[]; both are read, so a scorecard committed
+   * before that change still loads.
+   */
+  failures: Array<{
+    case_id: string;
+    failed: Array<string | { metric: string; score?: number; detail?: string }>;
+  }>;
+  providers?: {
+    requested: string[];
+    observed: string[];
+    failed_over: string[];
+  };
+}
+
+/** Normalizes either failures shape to { metric, detail }. */
+function failedMetrics(
+  failed: Array<string | { metric: string; score?: number; detail?: string }>,
+): Array<{ metric: string; detail: string }> {
+  return failed.map((f) =>
+    typeof f === "string" ? { metric: f, detail: "" } : { metric: f.metric, detail: f.detail ?? "" },
+  );
 }
 
 export type EvalReport =
@@ -101,7 +123,12 @@ export function selectMetric(report: EvalReport, metric: string): unknown {
     suite: report.suite,
     metric,
     ...entry,
-    // Which cases failed this metric specifically — the actionable part.
-    failing_cases: report.failures.filter((f) => f.failed.includes(metric)).map((f) => f.case_id),
+    // Which cases failed this metric specifically — the actionable part —
+    // with the reason, so the caller does not have to go to the database to
+    // learn what the run actually decided.
+    failing_cases: report.failures.flatMap((f) => {
+      const hit = failedMetrics(f.failed).find((m) => m.metric === metric);
+      return hit ? [{ case_id: f.case_id, detail: hit.detail }] : [];
+    }),
   };
 }
