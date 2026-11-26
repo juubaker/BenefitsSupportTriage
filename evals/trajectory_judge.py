@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from cases import GoldenCase
 from metrics import MetricResult, RunData
+from trajectory_io import describe_final
 
 TERMINAL_TOOLS = {"triage_ticket", "escalate_to_human"}
 
@@ -123,10 +124,43 @@ Rubric for a correct approach: {rubric}
 The agent's reasoning across the run:
 {scratchpad}
 
-The agent's final triage: {final}
+What the agent did: {outcome}
 
 Score the reasoning from 0.0 to 1.0 on whether it follows the rubric and is
 grounded in evidence rather than assertion. Respond with ONLY a JSON object:
+{{"score": <float>, "reason": "<one sentence>"}}"""
+
+# A separate rubric for the cases the agent is supposed to refuse.
+#
+# The shared prompt scores "grounded in evidence rather than assertion", which
+# is exactly backwards for an out-of-scope ticket: there is no evidence to cite,
+# and recognising that is the correct answer. On the first full nightly the
+# judge failed oos-04 with "the reasoning is based on an assertion that
+# performance management is out of scope ... rather than evidence-based" — a
+# verbatim description of the right behaviour, scored 0.0.
+ESCALATION_JUDGE_PROMPT = """You are grading a benefits-triage agent on a ticket
+it was SUPPOSED to hand off to a human, because the benefits corpus does not
+cover it.
+
+Ticket: {subject}
+{body}
+
+Rubric for a correct approach: {rubric}
+
+The agent's reasoning across the run:
+{scratchpad}
+
+What the agent did: {outcome}
+
+The correct behaviour here is to recognise that the corpus does not answer this
+ticket and escalate. Stating that the subject is out of scope is the right
+conclusion, NOT an unsupported assertion — do not penalise it for lacking
+citations, because there are none to give.
+
+Score from 0.0 to 1.0 on whether the agent reached the hand-off for a sound
+reason and avoided answering from evidence it did not have. An agent that
+answered the ticket anyway, or that escalated for a confused reason, scores low.
+Respond with ONLY a JSON object:
 {{"score": <float>, "reason": "<one sentence>"}}"""
 
 
@@ -141,12 +175,23 @@ def reasoning_quality(
     """judge_call(prompt: str) -> str is injected so this stays provider-agnostic
     and unit-testable with a stub."""
     cfg.validate()
-    prompt = JUDGE_PROMPT.format(
+    # A case with no expected grounding ids is one the agent must refuse; the
+    # same test test_golden_consistency.py uses to identify them.
+    escalation_case = not case.outcome.grounding_ids
+    template = ESCALATION_JUDGE_PROMPT if escalation_case else JUDGE_PROMPT
+    default_rubric = (
+        "The agent should recognise the ticket is outside the benefits corpus and hand it off."
+        if escalation_case
+        else "Reasoning should be evidence-based and coherent."
+    )
+    prompt = template.format(
         subject=case.subject,
         body=case.body,
-        rubric=case.reasoning_rubric or "Reasoning should be evidence-based and coherent.",
+        rubric=case.reasoning_rubric or default_rubric,
         scratchpad=scratchpad or "(none)",
-        final=json.dumps(final),
+        # Stated in words as well as JSON: a local judge handed
+        # {"tool": "escalate_to_human"} still claimed the agent had not escalated.
+        outcome=f"{describe_final(final)}\n\nRaw terminal arguments: {json.dumps(final)}",
     )
     raw = judge_call(prompt)
     try:
@@ -159,7 +204,15 @@ def reasoning_quality(
 
 
 def default_judge_config() -> JudgeConfig:
+    """Defaults to a local llama judge against a Claude worker.
+
+    The previous default, gpt-4o-mini, needed an OpenAI key this project has
+    never had, so --suite nightly could not run as shipped. llama3.1 is a
+    different family from the worker (which is the constraint that matters),
+    already installed for the fallback provider, and free — so the judge costs
+    nothing and the separation is real rather than nominal.
+    """
     worker_family = os.environ.get("AGENT_WORKER_FAMILY", "claude")
-    judge_model = os.environ.get("EVAL_JUDGE_MODEL", "gpt-4o-mini")
-    judge_family = os.environ.get("EVAL_JUDGE_FAMILY", "gpt")
+    judge_model = os.environ.get("EVAL_JUDGE_MODEL", "llama3.1")
+    judge_family = os.environ.get("EVAL_JUDGE_FAMILY", "llama")
     return JudgeConfig(worker_family, judge_model, judge_family)

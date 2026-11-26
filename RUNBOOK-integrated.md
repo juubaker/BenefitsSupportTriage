@@ -251,6 +251,8 @@ Alert on relative jumps, not absolute numbers.
 | Duplicate retrieval hits | Ingest ran twice (it appends) | `TRUNCATE … RESTART IDENTITY;` then re-ingest once |
 | Grounded route ignores `LLM_PROVIDER` | `draftGrounded` hardcoded a provider | Ensure it calls `providers.draft.draftGrounded`, not a direct fetch |
 | `Ollama embed failed ECONNREFUSED` | Ollama not running | `ollama serve`; `ollama pull nomic-embed-text` |
+| Run starts on `anthropic` then immediately restarts on `ollama`/llama3.1 | Anthropic call failed; the harness fails over by design | The `provider_failover` SSE event and the server log now carry the reason. `cd agent && npm run provider-check` to get it directly: `status=400` + "credit balance is too low" is an empty account (Console → Plans & Billing) — this was the real cause for weeks; `401` bad key, `403` key not permitted for the model, `404` wrong `ANTHROPIC_MODEL`, `429`/`529` retry |
+| Eval scorecard looks like a Claude result but the numbers are suspiciously poor | The suite scored the fallback; `agent_runs.provider` records the request, not what ran | `providers.failed_over` in the scorecard names the affected cases, and the gate now fails on a fallback. Pin the model with `python run.py --suite nightly --provider anthropic` |
 
 ---
 

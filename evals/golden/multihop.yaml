@@ -8,11 +8,19 @@ cases:
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
     reasoning_rubric: "Addresses BOTH the QLE special-enrollment path and the COBRA comparison, citing evidence for each."
 
+  # Relabelled enrollment/high after the first Claude run disagreed and turned
+  # out to be right. A move out of the HMO service area is resolved by SWITCHING
+  # plans, and CATEGORY_BOUNDARIES defines enrollment as an action on coverage
+  # "(add, drop, switch)"; eligibility would fit if only the HSA hop were asked.
+  # It is also a QLE with a 31-day window (see resolved ticket R-54), and
+  # PRIORITY_GUIDANCE puts a running deadline at high, reserving medium for
+  # "no deadline running". The old labels contradicted both rubrics, the
+  # precedent corpus, and sibling case multihop-09 on the same event.
   - id: multihop-02
     bucket: multihop
     subject: "Moving states — plan and HSA impact"
     body: "I'm relocating to another state next month. Does my HMO still work there, and does the move change my HSA eligibility?"
-    outcome: { category: "eligibility", priority: "medium", grounding_ids: ["chunk-hmo-network-02", "chunk-hsa-22"] }
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-hmo-network-02", "chunk-hsa-22"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
     reasoning_rubric: "Separately resolves network coverage in the new state and HSA eligibility effects."
 
@@ -24,11 +32,17 @@ cases:
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
     reasoning_rubric: "Treats divorce as a QLE permitting both the dependent removal and the FSA change."
 
+  # high, not medium — the same error as multihop-02 and multihop-09. "I just
+  # started. When must I enroll" is a new hire inside a 31-day window, and
+  # PRIORITY_GUIDANCE puts at high "anything where delay costs the employee an
+  # option": missing this window costs them coverage until open enrollment. The
+  # agent answered high on every nightly run. The high examples now name the
+  # new-hire window explicitly.
   - id: multihop-04
     bucket: multihop
     subject: "New hire — enrollment window and 401k start"
     body: "I just started. When must I enroll in health benefits, and when am I eligible for the 401k match?"
-    outcome: { category: "enrollment", priority: "medium", grounding_ids: ["chunk-newhire-01", "chunk-401k-05"] }
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-newhire-01", "chunk-401k-05"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
 
   - id: multihop-05
@@ -59,11 +73,14 @@ cases:
     outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-leave-03"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
 
+  # priority raised to high for the same reason as multihop-02: the case cites
+  # chunk-qle-12, so a 31-day window is running. Caught while fixing -02; it
+  # would have failed nightly on the next run for exactly the same mislabel.
   - id: multihop-09
     bucket: multihop
     subject: "Switching HMO to PPO mid-year after move"
     body: "After my move, can I switch from the HMO to the PPO outside open enrollment, and what's the premium difference?"
-    outcome: { category: "enrollment", priority: "medium", grounding_ids: ["chunk-qle-12", "chunk-ppo-06"] }
+    outcome: { category: "enrollment", priority: "high", grounding_ids: ["chunk-qle-12", "chunk-ppo-06"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 2 }
 
   - id: multihop-10

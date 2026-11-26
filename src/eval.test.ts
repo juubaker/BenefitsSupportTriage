@@ -120,7 +120,30 @@ describe("selectMetric", () => {
 
     expect(r.metric).toBe("outcome_correctness");
     expect(r.rate).toBe(0.8);
-    expect(r.failing_cases).toEqual(["multihop-01", "multihop-02"]);
+    // SCORECARD uses the legacy bare-string shape, which must still read.
+    expect(r.failing_cases).toEqual([
+      { case_id: "multihop-01", detail: "" },
+      { case_id: "multihop-02", detail: "" },
+    ]);
+  });
+
+  it("carries the detail string when the scorecard has one", async () => {
+    const detail = "category='enrollment' expected='eligibility'";
+    const withDetail = {
+      ...SCORECARD,
+      failures: [
+        {
+          case_id: "multihop-02",
+          failed: [{ metric: "outcome_correctness", score: 0, detail }],
+        },
+      ],
+    };
+    const p = await write("detailed.json", JSON.stringify(withDetail));
+    const report = await readLatestEvalReport(p);
+
+    const r = selectMetric(report, "outcome_correctness") as Record<string, unknown>;
+
+    expect(r.failing_cases).toEqual([{ case_id: "multihop-02", detail }]);
   });
 
   it("lists what is present when a metric is absent", async () => {

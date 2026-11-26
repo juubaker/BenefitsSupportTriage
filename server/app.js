@@ -54,6 +54,11 @@ export function createApp({
   providers = null,
   llmProvider = null,
   agentRouter = null,
+  // { providerNames, defaultProvider } from createAgentRuntime. Reported on
+  // /api/health so a caller can check a provider exists before pinning to it —
+  // createAgentRuntime has exposed providerNames "for /api/health" since it was
+  // written, and nothing read it.
+  agentInfo = null,
 } = {}) {
   // Accept three injection shapes:
   //   1. providers: { triage, draft }      — per-route
@@ -89,6 +94,13 @@ export function createApp({
       ok: true,
       anthropicKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
       databaseUrl: process.env.DATABASE_URL ? 'configured' : 'missing',
+      agent: agentRouter
+        ? {
+            mounted: true,
+            providers: agentInfo?.providerNames ?? [],
+            defaultProvider: agentInfo?.defaultProvider ?? null,
+          }
+        : { mounted: false, providers: [], defaultProvider: null },
       ...info,
     });
   });

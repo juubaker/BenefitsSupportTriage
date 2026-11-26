@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { AgentHarness, MemoryRunStore } from "../src/harness.js";
 import { ToolRegistry } from "../src/registry.js";
@@ -508,5 +508,121 @@ describe("escalation after an ungrounded triage is refused", () => {
 
     expect(terminal).toMatchObject({ state: "completed" });
     expect(escalations).toHaveLength(1);
+  });
+});
+
+describe("provider failover visibility", () => {
+  /** Runs with anthropic failing on its first turn and ollama healthy. */
+  async function failover(
+    err: Error,
+    opts: Parameters<AgentHarness["run"]>[1] = {},
+  ): Promise<{ events: AgentEvent[]; logs: string[] }> {
+    const { registry } = buildTestRegistry();
+    const harness = new AgentHarness({
+      providers: {
+        anthropic: new FakeProvider([{ throwError: err }], "anthropic"),
+        ollama: new FakeProvider(
+          [
+            { text: "Searching.", toolCalls: [{ name: "search_policies", input: { query: "spouse loss of coverage", k: 5 } }] },
+            { text: "Done.", toolCalls: [{ name: "triage_ticket", input: FINAL }] },
+          ],
+          "ollama",
+        ),
+      },
+      defaultProvider: "anthropic",
+      registryFor: () => registry,
+      store: new MemoryRunStore(),
+      systemPrompt: "test system prompt",
+    });
+
+    // The harness logs the provider error deliberately; capture it rather than
+    // letting a passing test print a scary line on every run.
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const events: AgentEvent[] = [];
+    try {
+      for await (const event of harness.run(TICKET, opts)) {
+        events.push(event);
+        if (event.type === "terminal") break;
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    return { events, logs };
+  }
+
+  it("emits provider_failover carrying the reason, before the fallback starts", async () => {
+    // Every live run has dropped from Claude to llama3.1 with no explanation,
+    // because the reason went only to a tracing event that is off by default.
+    const err = Object.assign(new Error("404 model not found"), { status: 404 });
+    const { events } = await failover(err);
+
+    const failoverIdx = events.findIndex((e) => e.type === "provider_failover");
+    expect(failoverIdx).toBeGreaterThanOrEqual(0);
+    expect(events[failoverIdx]).toMatchObject({
+      type: "provider_failover",
+      from: "anthropic",
+      to: "ollama",
+    });
+    const reason = (events[failoverIdx] as { reason: string }).reason;
+    expect(reason).toContain("404 model not found");
+    expect(reason).toContain("status=404");
+
+    // Ordering matters: a client reading the stream in order must see why the
+    // provider changed before it sees the new one start.
+    const secondStart = events.findIndex(
+      (e, i) => i > failoverIdx && e.type === "run_started",
+    );
+    expect(secondStart).toBeGreaterThan(failoverIdx);
+    expect(events[secondStart]).toMatchObject({ provider: "ollama" });
+  });
+
+  it("unwraps the cause chain, so a transport failure names itself", async () => {
+    const err = new Error("fetch failed");
+    (err as { cause?: unknown }).cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), {
+      code: "ECONNREFUSED",
+    });
+    const { events } = await failover(err);
+    const reason = (events.find((e) => e.type === "provider_failover") as { reason: string }).reason;
+    expect(reason).toContain("code=ECONNREFUSED");
+    expect(reason).toContain("cause=connect ECONNREFUSED 127.0.0.1:443");
+  });
+
+  it("logs the failure server-side, naming the provider and model", async () => {
+    const { logs } = await failover(Object.assign(new Error("401 invalid x-api-key"), { status: 401 }));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("provider anthropic (fake-model) failed");
+    expect(logs[0]).toContain("status=401");
+  });
+
+  it("still logs when the provider is pinned and the error is rethrown", async () => {
+    // A pinned provider does not fail over, so the thrown error is all the
+    // caller gets — and the harness is the only place that saw the cause.
+    const { registry } = buildTestRegistry();
+    const harness = new AgentHarness({
+      providers: {
+        anthropic: new FakeProvider([{ throwError: new Error("529 overloaded") }], "anthropic"),
+        ollama: new FakeProvider([], "ollama"),
+      },
+      defaultProvider: "ollama",
+      registryFor: () => registry,
+      store: new MemoryRunStore(),
+      systemPrompt: "test system prompt",
+    });
+
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    await expect(async () => {
+      for await (const _ of harness.run(TICKET, { provider: "anthropic" })) {
+        // drain
+      }
+    }).rejects.toThrow("529 overloaded");
+    spy.mockRestore();
+
+    expect(logs.some((l) => l.includes("provider anthropic") && l.includes("529 overloaded"))).toBe(true);
   });
 });

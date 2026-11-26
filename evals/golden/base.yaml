@@ -52,18 +52,28 @@ cases:
     outcome: { category: "spending_accounts", priority: "low", grounding_ids: ["chunk-hsa-22", "chunk-fsa-07"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 5, min_retrieval_calls: 1 }
 
+  # low, not medium. "Is there a waiting period?" is a factual lookup about how
+  # the benefit works — nobody has gone out on disability here, nothing is
+  # pending and nothing expires. It was labelled medium because PRIORITY_GUIDANCE
+  # listed "a disability waiting period" as a medium example, contradicting its
+  # own definition of low; the example is gone and the agent answered low on
+  # every nightly run.
   - id: base-08
     bucket: base
     subject: "Short-term disability waiting period"
     body: "Is there a waiting period before short-term disability pays out?"
-    outcome: { category: "disability", priority: "medium", grounding_ids: ["chunk-std-04"] }
+    outcome: { category: "disability", priority: "low", grounding_ids: ["chunk-std-04"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
 
+  # low, not medium. Asking when a window opens is a calendar lookup; the
+  # employee has not said they are deciding anything and the window is not
+  # running yet. A ticket that asked what happens if they let it pass would be
+  # medium, and one sent during the window would be high.
   - id: base-09
     bucket: base
     subject: "Open enrollment dates"
     body: "When is open enrollment this year?"
-    outcome: { category: "enrollment", priority: "medium", grounding_ids: ["chunk-oe-01"] }
+    outcome: { category: "enrollment", priority: "low", grounding_ids: ["chunk-oe-01"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
 
   - id: base-10
@@ -87,11 +97,15 @@ cases:
     outcome: { category: "commuter", priority: "low", grounding_ids: ["chunk-commuter-01"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
 
+  # low, not medium. "At all?" asks whether a category of care is covered —
+  # plan mechanics, with no provider chosen and no claim filed. Labelled medium
+  # from the old "out-of-network costs" example, which described this exact
+  # question while low's definition covered it.
   - id: base-13
     bucket: base
     subject: "Out-of-network coverage"
     body: "Does the PPO cover out-of-network providers at all?"
-    outcome: { category: "medical", priority: "medium", grounding_ids: ["chunk-ppo-06"] }
+    outcome: { category: "medical", priority: "low", grounding_ids: ["chunk-ppo-06"] }
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 4, min_retrieval_calls: 1 }
 
   - id: base-14

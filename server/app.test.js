@@ -129,6 +129,42 @@ describe('GET /api/health', () => {
     expect(res.body.anthropicKeyConfigured).toBe(false);
     expect(res.body.triage.provider).toBe('ollama');
   });
+
+  it('reports the agent providers, so a caller can check one before pinning to it', async () => {
+    const app = createApp({
+      ...makeMockRepos(),
+      llmProvider: makeFakeProvider({ name: 'ollama' }),
+      agentRouter: (_req, _res, next) => next(),
+      agentInfo: { providerNames: ['ollama', 'anthropic'], defaultProvider: 'anthropic' },
+    });
+    const res = await request(app).get('/api/health');
+    expect(res.body.agent).toEqual({
+      mounted: true,
+      providers: ['ollama', 'anthropic'],
+      defaultProvider: 'anthropic',
+    });
+  });
+
+  it('says the agent is not mounted rather than omitting it', async () => {
+    // An absent key and an unmounted agent are different problems; the eval
+    // preflight distinguishes them, so the field has to exist either way.
+    const app = createApp({
+      ...makeMockRepos(),
+      llmProvider: makeFakeProvider({ name: 'ollama' }),
+    });
+    const res = await request(app).get('/api/health');
+    expect(res.body.agent).toEqual({ mounted: false, providers: [], defaultProvider: null });
+  });
+
+  it('reports mounted with an empty provider list when agentInfo was not passed', async () => {
+    const app = createApp({
+      ...makeMockRepos(),
+      llmProvider: makeFakeProvider({ name: 'ollama' }),
+      agentRouter: (_req, _res, next) => next(),
+    });
+    const res = await request(app).get('/api/health');
+    expect(res.body.agent).toEqual({ mounted: true, providers: [], defaultProvider: null });
+  });
 });
 
 describe('GET /api/posts', () => {

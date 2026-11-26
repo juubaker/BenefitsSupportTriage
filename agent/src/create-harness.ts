@@ -55,6 +55,9 @@ export function createAgentRuntime(env: NodeJS.ProcessEnv = process.env): AgentR
     db: pool as unknown as Queryable,
     embed: createOllamaEmbedder({ baseUrl: env.OLLAMA_URL, model: env.OLLAMA_EMBED_MODEL }),
     minSimilarity: env.RETRIEVAL_MIN_SIM ? Number(env.RETRIEVAL_MIN_SIM) : undefined,
+    ticketMinSimilarity: env.RETRIEVAL_TICKET_MIN_SIM
+      ? Number(env.RETRIEVAL_TICKET_MIN_SIM)
+      : undefined,
   });
 
   let tracing: AgentTracing | undefined;

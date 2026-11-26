@@ -80,10 +80,24 @@ const CATEGORY_BOUNDARIES = [
 ].join(" ");
 
 /** When a ticket is urgent, stated as what the employee stands to lose. */
+/**
+ * The low/medium split had the wrong examples, and the golden dataset was
+ * labelled from them: medium listed "out-of-network costs" and "a disability
+ * waiting period", which are plain factual lookups — exactly what low
+ * describes. base-08, base-09 and base-13 ask those questions verbatim, were
+ * labelled medium, and the agent answered low on every run of the nightly.
+ * It was reading the definitions; the dataset was reading the examples.
+ *
+ * The test is now stated outright rather than left in the examples: is the
+ * employee asking how the plan works, or about something happening to them?
+ * Examples are chosen so each one can only sit in its own band.
+ */
 const PRIORITY_GUIDANCE = [
-  "low: a factual lookup about how a benefit works, with no action for the employee and no deadline running (a copay amount, an annual maximum, a match formula).",
-  "medium: a question that affects a decision or involves the employee's own situation, but with no deadline running (comparing plans, out-of-network costs, a disability waiting period).",
-  "high: a deadline is running or coverage is at risk — a qualifying life event and its 31-day window, a dependent aging off, job loss, a newborn, anything where delay costs the employee an option.",
+  "Decide priority by whose situation is in play, then by whether the clock is running.",
+  "Judge that by what the ticket is about, not by the form of the question. A tier, copay or coverage question is low when it is asked in the abstract and medium when the employee is weighing a choice or is already affected by it — the same words can be either, so read what they say about themselves.",
+  "low: the question is about how the plan works in general, not about anything happening to this employee now. Nothing for them to decide and no deadline (a copay amount, an annual maximum, a match formula, a waiting period, whether a plan covers a category of care, when a window opens).",
+  "medium: this employee's own circumstances are in play — they are weighing an option, or something has happened to them that the answer bears on — but nothing expires if they wait (choosing between two plans they are eligible for, what a claim they have already filed will pay, how a change they have made affects their paycheck).",
+  "high: a deadline is running or coverage is at risk, so delay costs the employee an option — a qualifying life event and its 31-day window, a new hire's enrollment window, a dependent aging off, job loss, a newborn.",
   "urgent: rare; active loss of coverage or a missed deadline that needs same-day intervention.",
 ].join(" ");
 
@@ -190,7 +204,11 @@ export function buildRegistry(services: TriageServices): ToolRegistry {
   registry.register({
     name: "find_similar_tickets",
     description:
-      "Find previously resolved support tickets similar to a description. Use to check how comparable cases were resolved.",
+      "Find previously resolved support tickets similar to this one, to check how comparable cases were resolved. " +
+      "Pass the ticket's own wording — a sentence or two of what the employee actually asked — not keywords. " +
+      "This corpus is written in employees' words, so natural phrasing matches it and a keyword list does not: " +
+      "the same ticket that scores 0.73 against full wording scores below the floor against terms like " +
+      "\"spouse job loss enrollment mid-year\".",
     schema: z
       .object({
         // `query` matches search_policies: two names for the same concept

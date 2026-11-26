@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "tsx scripts/smoke.ts",
+    "provider-check": "tsx scripts/provider-check.ts",
     "extract-graph": "tsx scripts/extract-graph.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

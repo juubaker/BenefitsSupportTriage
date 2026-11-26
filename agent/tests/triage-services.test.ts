@@ -489,3 +489,97 @@ describe("the system prompt states where scope ends", () => {
     expect(SYSTEM_PROMPT).toMatch(/Urgency in the ticket is not evidence/);
   });
 });
+
+describe("the two corpora get separately measured floors", () => {
+  function recordingDb() {
+    const calls: Array<{ text: string; params: unknown[] }> = [];
+    return {
+      calls,
+      async query<R>(text: string, params: unknown[] = []) {
+        calls.push({ text, params });
+        return { rows: [] as R[] };
+      },
+    };
+  }
+  const embed = async () => [0.1, 0.2, 0.3];
+  const ctx = { runId: "run-1", step: 1 };
+
+  it("uses 0.60 for both corpora by default, measured separately", async () => {
+    // Tickets: evals/ticket_floor.py — every golden case that must escalate
+    // tops out at 0.5779 against that corpus, every multi-hop case is 0.6684
+    // or above, and 0.60 sits in the gap.
+    // Policies: evals/policy_floor.py — at 0.65 only 37 of 43 required chunks
+    // were reachable and one of the misses was rank 1; at 0.60 recall is 100%.
+    // The two values coincide by measurement, not by sharing a constant, so
+    // the query bindings stay distinct and either can move alone.
+    const db = recordingDb();
+    const services = createPgTriageServices({ db, embed }).forTicket({ ticketId: "T-1" });
+
+    await services.searchPolicies("qualifying life event", 5);
+    await services.findSimilarTickets("my spouse lost her job last week", 3);
+
+    expect(db.calls[0].text).toContain("FROM policy_chunks");
+    expect(db.calls[0].params[1]).toBe(0.6);
+    expect(db.calls[1].text).toContain("FROM resolved_tickets");
+    expect(db.calls[1].params[1]).toBe(0.6);
+  });
+
+  it("keeps no escalation case above the ticket floor", () => {
+    // The guard this protects: a triage citing nothing is refused so the run
+    // escalates, but a cited R- id satisfies that check. Spurious precedent on
+    // an out-of-scope ticket would quietly undo the escalation fix.
+    const HIGHEST_ESCALATION_CASE = 0.5779; // adversarial-05
+    const LOWEST_INCLUDED_ANSWERABLE = 0.6044; // base-03
+
+    expect(HIGHEST_ESCALATION_CASE).toBeLessThan(0.6);
+    expect(LOWEST_INCLUDED_ANSWERABLE).toBeGreaterThan(0.6);
+  });
+
+  it("documents why the policy floor does NOT get the same separation", () => {
+    // The ticket corpus has clean separation; the policy corpus does not, and
+    // pretending otherwise would be the dangerous kind of green test.
+    // policy_floor.py: recall needs <= 0.6322 (multihop-10's chunk-fsa-07),
+    // starving every escalation case needs > 0.6648 (adversarial-05's
+    // chunk-coord-01). The bounds cross, so no floor satisfies both.
+    const RECALL_CEILING = 0.6322;
+    const ESCALATION_HEADROOM_FLOOR = 0.6648;
+    expect(ESCALATION_HEADROOM_FLOOR).toBeGreaterThan(RECALL_CEILING);
+
+    // Which is survivable only because retrieval is not what drives
+    // escalation: adversarial-05 cleared the OLD 0.65 floor, retrieved a
+    // chunk, and escalated anyway. A full nightly at 0.60 held adversarial at
+    // 5/5 and took escalation_correctness to 1.0. If that ever stops being
+    // true, this floor is the first thing to revisit.
+    expect(ESCALATION_HEADROOM_FLOOR).toBeGreaterThan(0.65);
+  });
+
+  it("lets each floor be overridden independently", async () => {
+    const db = recordingDb();
+    const services = createPgTriageServices({
+      db,
+      embed,
+      minSimilarity: 0.8,
+      ticketMinSimilarity: 0.4,
+    }).forTicket({ ticketId: "T-1" });
+
+    await services.searchPolicies("x", 5);
+    await services.findSimilarTickets("y", 3);
+
+    expect(db.calls[0].params[1]).toBe(0.8);
+    expect(db.calls[1].params[1]).toBe(0.4);
+  });
+
+  it("tells the model to pass the ticket's wording rather than keywords", () => {
+    const spec = buildRegistry({
+      searchPolicies: async () => [],
+      findSimilarTickets: async () => [],
+      saveTriage: async () => {},
+      escalate: async () => {},
+    })
+      .specs()
+      .find((s) => s.name === "find_similar_tickets");
+
+    expect(spec?.description).toMatch(/ticket's own wording/);
+    expect(spec?.description).toMatch(/not keywords/);
+  });
+});

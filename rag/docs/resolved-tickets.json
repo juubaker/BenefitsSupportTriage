@@ -1,17 +1,117 @@
 [
   {
     "caseText": "I just got married last week. Can I add my spouse to my medical plan now, or do I have to wait until open enrollment?",
-    "category": "Life Event",
+    "category": "enrollment",
     "approvedResponse": "Congratulations! Marriage is a qualifying life event, so you don't have to wait for open enrollment. You have 31 days from your wedding date to add your spouse. You'll need to submit a copy of your marriage certificate along with the enrollment change. If you'd like, I can point you to the enrollment form."
   },
   {
     "caseText": "My daughter is turning 26 in March. How long can she stay on my health insurance?",
-    "category": "Dependent Coverage",
+    "category": "eligibility",
     "approvedResponse": "Your daughter can remain on your plan through the end of the month in which she turns 26. Since her birthday is in March, her coverage would continue through March 31. After that she'd need to find other coverage, and she may qualify for COBRA continuation — let me know if you'd like details on that."
   },
   {
     "caseText": "I work about 25 hours a week. Am I able to sign up for the medical plan?",
-    "category": "Eligibility",
+    "category": "eligibility",
     "approvedResponse": "Medical coverage is available to employees working 30 or more hours per week. At 25 hours you wouldn't be eligible for the medical plan, but you may be eligible for some voluntary benefits. I can share which voluntary options are open to part-time employees if that's helpful."
+  },
+  {
+    "caseText": "My husband was laid off and we're losing his employer coverage at the end of the month. Can I add him and our kids to my plan?",
+    "category": "enrollment",
+    "approvedResponse": "Yes. A spouse losing coverage through their own employer is a qualifying life event, so you can add your husband and your children to your plan outside of open enrollment. You have 31 days from the date his coverage ends, and you'll need a letter from his employer or carrier showing the end date. Worth comparing against COBRA on his side before you decide — adding them to your plan is usually less expensive, since COBRA is the full premium plus a 2% administrative fee."
+  },
+  {
+    "caseText": "I'm getting divorced. How do I take my ex-spouse off my medical plan, and can I change my FSA election too?",
+    "category": "enrollment",
+    "approvedResponse": "Divorce is a qualifying life event, so you can remove your ex-spouse within 31 days of the decree date. Send us a copy of the decree and we'll process the change. You can also adjust your health care FSA election at the same time, as long as the change is consistent with the event. Your ex-spouse may be eligible for COBRA for up to 36 months — we'll send that notice separately."
+  },
+  {
+    "caseText": "Our baby was born on the 3rd. What do I need to do to get her on our insurance?",
+    "category": "enrollment",
+    "approvedResponse": "Congratulations. Birth is a qualifying life event, and you have 31 days from the date of birth to add your daughter. Her coverage is effective from the date she was born, not from when you submit the change, so there's no gap. Send us the birth certificate or the hospital placement record. Prenatal visits and delivery are covered as medical benefits, and if you're taking leave, short-term disability runs for the recovery period — typically six weeks, or eight after a cesarean."
+  },
+  {
+    "caseText": "We're adopting a child and placement is next month. Can I add him to my coverage, and does leave work the same way?",
+    "category": "enrollment",
+    "approvedResponse": "Yes. Adoption or foster placement is a qualifying life event, so you have 31 days from the placement date to add him. Send the placement order as documentation. Parental leave of 8 weeks at full pay is available and can run alongside your 12 weeks of job-protected leave. Your medical, dental and vision coverage continues on the same terms while you're on approved leave."
+  },
+  {
+    "caseText": "I just started last week. How long do I have to pick my benefits, and when does the 401(k) kick in?",
+    "category": "enrollment",
+    "approvedResponse": "You have 31 days from your hire date to elect medical, dental and vision, and coverage starts the first of the month following your hire date. If you miss that window you'd have to wait for open enrollment or a qualifying life event. The 401(k) is separate: participation begins after 30 days of employment, and you're automatically enrolled at 3% unless you change it. The company matches 100% of the first 3% you contribute and 50% of the next 2%, so contributing 5% gets you the full 4% match."
+  },
+  {
+    "caseText": "How do I change my primary care doctor on the HMO? The one I was assigned isn't taking new patients.",
+    "category": "plan_administration",
+    "approvedResponse": "You can change your PCP at any time through the member portal or by calling the number on your ID card — no qualifying life event needed. If you request the change on or before the 15th of the month it takes effect the first of the following month; after the 15th it takes effect the month after that. You can do this as often as you need to."
+  },
+  {
+    "caseText": "I'm moving to another state for family reasons. Will my HMO still work there?",
+    "category": "enrollment",
+    "approvedResponse": "The HMO uses a regional network and doesn't cover care outside its service area except for emergencies and urgent care while travelling, so a permanent move out of the area means you'll want to switch to the PPO. A move out of the service area is a qualifying life event, so you can change plans within 31 days of the move — send proof of your new address. Worth knowing the PPO costs more per paycheck but covers non-network care at 60% after a separate deductible."
+  },
+  {
+    "caseText": "I took a second job that offers insurance. Can I be on both plans, and what happens to my HSA?",
+    "category": "eligibility",
+    "approvedResponse": "You can be covered by both plans. Ours would pay first since you're an employee here, and the other plan may pick up remaining eligible charges. The HSA is the part to watch: enrolling in a non-HDHP plan, including as a dependent, ends your HSA contribution eligibility for the months that coverage is in effect, so you'd need to stop contributions for those months to avoid an excess. Please report the other coverage within 31 days of its start."
+  },
+  {
+    "caseText": "What's the difference between the HSA and the health care FSA? I can't tell which one I should be using.",
+    "category": "spending_accounts",
+    "approvedResponse": "The HSA requires you to be enrolled in the HDHP, the money is yours to keep when you leave, and the balance carries over indefinitely. The health care FSA is available on any plan, gives you the full annual election on day one of the plan year, but only $660 rolls over and the account isn't portable when employment ends. You can't contribute to both in the same period. If you're on the HDHP and can cover expenses out of pocket for now, most people prefer the HSA for the portability."
+  },
+  {
+    "caseText": "I'm going out on short-term disability for surgery. When does the pay start and how much is it?",
+    "category": "disability",
+    "approvedResponse": "Short-term disability replaces 60% of your base pay for up to 26 weeks. There's a 7-calendar-day waiting period first, which you cover with accrued sick time or unpaid leave, so benefits begin on day 8 of the approved absence. You'll need certification from your treating provider. If the absence runs longer than 26 weeks, long-term disability can begin when short-term is exhausted."
+  },
+  {
+    "caseText": "I'm back from medical leave next Monday. Do my benefits restart automatically, and what about the FSA I had?",
+    "category": "plan_administration",
+    "approvedResponse": "Your medical, dental and vision continued during approved leave, so there's nothing to re-elect — they carry on as they were. FSA contributions were suspended during the unpaid portion and resume at your prior election when you return, unless you ask for a change within 31 days of coming back. If anything looks wrong on your first paycheck after returning, send it over and we'll check the deductions."
+  },
+  {
+    "caseText": "My prescription went from $10 to $70 this month and nothing changed on my end.",
+    "category": "pharmacy",
+    "approvedResponse": "That jump usually means the medication moved tiers, most often from preferred brand to non-preferred brand. The tiers are $10 for generic, $35 for preferred brand, $70 for non-preferred brand, and 20% coinsurance up to $250 for specialty. Two things worth trying: ask your prescriber whether a tier 1 or tier 2 alternative would work, and if you stay on this one, a 90-day supply through mail order is dispensed for two copays rather than three."
+  },
+  {
+    "caseText": "I need a crown and the dentist quoted $1,800. How much does the plan cover?",
+    "category": "dental",
+    "approvedResponse": "A crown is a major service, covered at 50% after your $50 individual deductible. The annual maximum is $2,000 per person per calendar year, so if you haven't used much of it yet the plan portion should be available. Anything above the annual maximum is your responsibility. If the work can be split across two calendar years, that's sometimes worth discussing with your dentist."
+  },
+  {
+    "caseText": "Can I get new glasses this year? I think I got my last pair about 18 months ago.",
+    "category": "vision",
+    "approvedResponse": "Lenses are covered once every 12 months and frames once every 24 months, so at 18 months you're eligible for new lenses but not yet for a new frame — the frame allowance of $150 would be available at 24 months. You can also elect contact lenses instead of lenses and frames, with a $150 annual allowance. Routine exams are covered every 12 months with a $10 copay."
+  },
+  {
+    "caseText": "I want to add more life insurance for my family. How much can I get and is there a health questionnaire?",
+    "category": "life_insurance",
+    "approvedResponse": "The company provides basic life at one times your base salary up to $500,000 at no cost. You can elect supplemental coverage from one to five times salary, plus spouse and child coverage, during open enrollment or within 31 days of a qualifying life event. Elections above the guaranteed issue amount require evidence of insurability, which does mean a health questionnaire — below that threshold there's no medical review."
+  },
+  {
+    "caseText": "I started taking the train to work. Is there a pre-tax option for that, and do I have to wait for open enrollment?",
+    "category": "commuter",
+    "approvedResponse": "Yes, and no waiting — commuter elections can be started, changed or stopped monthly with no qualifying life event required. You can set aside pre-tax dollars for transit and for parking, each up to the IRS monthly limit of $340 for 2026. Unused balances carry forward while you're employed, but they're forfeited at termination, so it's worth keeping the election close to what you actually spend."
+  },
+  {
+    "caseText": "Things have been hard at home and I could use someone to talk to. Is counseling covered?",
+    "category": "wellbeing",
+    "approvedResponse": "Yes, and you don't need to enroll in anything to use it. The employee assistance program provides up to 8 free counseling sessions per issue per year for you and anyone in your household, with no copay. It also covers legal consultations, financial coaching, and referrals for childcare and eldercare. Use of the program is confidential and isn't reported back to the employer. If you'd like, I can send you the number to call directly."
+  },
+  {
+    "caseText": "When is open enrollment and what happens if I just don't do anything?",
+    "category": "enrollment",
+    "approvedResponse": "Open enrollment runs for a set window each autumn and we announce the dates in advance. If you don't make any elections, your current medical, dental and vision carry over at the new year's rates, but a couple of things don't: FSA elections don't roll over and must be re-elected each year, and if you want to change plans or add a dependent, open enrollment is the only chance outside a qualifying life event. So doing nothing is usually fine for coverage, but it does mean no FSA."
+  },
+  {
+    "caseText": "What paperwork do you need from me to add my wife after her coverage ended?",
+    "category": "plan_administration",
+    "approvedResponse": "For a loss of other coverage we need a letter from her prior carrier or employer showing the date the coverage ended. That has to reach us within 31 days of the event — the window isn't extended while documents are gathered, so send what you have and we can follow up on anything missing. Changes submitted without documentation aren't processed, which is the most common reason a mid-year change gets held up."
+  },
+  {
+    "caseText": "I'm 100% vested in my own contributions, right? Trying to work out what I'd keep if I left.",
+    "category": "retirement",
+    "approvedResponse": "Your own contributions are always fully vested — those are yours regardless of when you leave. The company match vests after two years of service. So if you left before hitting two years you'd keep everything you contributed plus its earnings, but would forfeit the unvested match. Your service date is on your statement; send it over if you'd like me to confirm where you stand."
   }
 ]

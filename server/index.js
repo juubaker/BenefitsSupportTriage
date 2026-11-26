@@ -43,7 +43,16 @@ if (process.env.AGENT_ENABLED !== 'false') {
   }
 }
 
-const app = createApp({ providers, agentRouter });
+const app = createApp({
+  providers,
+  agentRouter,
+  agentInfo: agentRuntime
+    ? {
+        providerNames: agentRuntime.providerNames,
+        defaultProvider: agentRuntime.defaultProvider,
+      }
+    : null,
+});
 
 app.listen(PORT, () => {
   console.log(`\n▸ Triage API listening on http://localhost:${PORT}`);

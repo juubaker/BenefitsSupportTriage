@@ -13,6 +13,7 @@ import type {
   TriageRequest,
 } from "./types.js";
 import { DEFAULT_BUDGET } from "./types.js";
+import { formatError } from "./describe-error.js";
 
 /**
  * Persistence boundary. DrizzleRunStore is the real one; tests use MemoryRunStore.
@@ -178,6 +179,14 @@ export class AgentHarness {
         // Provider failover only when the caller didn't pin a provider (spec §5).
         const fallbackName: ProviderName = provider.name === "anthropic" ? "ollama" : "anthropic";
         const fallback = this.deps.providers[fallbackName];
+        // The reason is computed before the escape hatches below, because a
+        // rethrown error still deserves the log line: this is the only place
+        // that has seen the provider error at all.
+        const reason = formatError(err);
+        // eslint-disable-next-line no-console
+        console.error(
+          `[agent] provider ${provider.name} (${provider.model}) failed on run ${runId}: ${reason}`,
+        );
         if (explicitPin || !fallback || opts.signal?.aborted) throw err;
         if (stepScope) {
           tracing!.endStep(stepScope, {
@@ -202,9 +211,18 @@ export class AgentHarness {
           tracing!.recordEvent(runScope, "provider_failover", {
             from: provider.name,
             to: fallback.name,
-            error: err instanceof Error ? err.message : String(err),
+            error: reason,
           });
         }
+        // Emitted before the second run_started so a client reading the stream
+        // in order sees why the provider changed, not just that it did.
+        yield {
+          type: "provider_failover",
+          from: provider.name,
+          to: fallback.name,
+          step: stepCount + 1,
+          reason,
+        };
         provider = fallback;
         yield { type: "run_started", runId, provider: fallback.name, model: fallback.model };
         yield* execute(fallback);
