@@ -504,11 +504,14 @@ describe("the two corpora get separately measured floors", () => {
   const embed = async () => [0.1, 0.2, 0.3];
   const ctx = { runId: "run-1", step: 1 };
 
-  it("uses 0.60 for tickets and 0.65 for policies by default", async () => {
-    // Measured in evals/ticket_floor.py: every golden case that must escalate
-    // tops out at 0.5779 against this corpus, every multi-hop case is 0.6684
-    // or above. 0.60 sits in that gap. 0.65, inherited from the policy sweep,
-    // returned nothing at all.
+  it("uses 0.60 for both corpora by default, measured separately", async () => {
+    // Tickets: evals/ticket_floor.py — every golden case that must escalate
+    // tops out at 0.5779 against that corpus, every multi-hop case is 0.6684
+    // or above, and 0.60 sits in the gap.
+    // Policies: evals/policy_floor.py — at 0.65 only 37 of 43 required chunks
+    // were reachable and one of the misses was rank 1; at 0.60 recall is 100%.
+    // The two values coincide by measurement, not by sharing a constant, so
+    // the query bindings stay distinct and either can move alone.
     const db = recordingDb();
     const services = createPgTriageServices({ db, embed }).forTicket({ ticketId: "T-1" });
 
@@ -516,7 +519,7 @@ describe("the two corpora get separately measured floors", () => {
     await services.findSimilarTickets("my spouse lost her job last week", 3);
 
     expect(db.calls[0].text).toContain("FROM policy_chunks");
-    expect(db.calls[0].params[1]).toBe(0.65);
+    expect(db.calls[0].params[1]).toBe(0.6);
     expect(db.calls[1].text).toContain("FROM resolved_tickets");
     expect(db.calls[1].params[1]).toBe(0.6);
   });
@@ -530,6 +533,24 @@ describe("the two corpora get separately measured floors", () => {
 
     expect(HIGHEST_ESCALATION_CASE).toBeLessThan(0.6);
     expect(LOWEST_INCLUDED_ANSWERABLE).toBeGreaterThan(0.6);
+  });
+
+  it("documents why the policy floor does NOT get the same separation", () => {
+    // The ticket corpus has clean separation; the policy corpus does not, and
+    // pretending otherwise would be the dangerous kind of green test.
+    // policy_floor.py: recall needs <= 0.6322 (multihop-10's chunk-fsa-07),
+    // starving every escalation case needs > 0.6648 (adversarial-05's
+    // chunk-coord-01). The bounds cross, so no floor satisfies both.
+    const RECALL_CEILING = 0.6322;
+    const ESCALATION_HEADROOM_FLOOR = 0.6648;
+    expect(ESCALATION_HEADROOM_FLOOR).toBeGreaterThan(RECALL_CEILING);
+
+    // Which is survivable only because retrieval is not what drives
+    // escalation: adversarial-05 cleared the OLD 0.65 floor, retrieved a
+    // chunk, and escalated anyway. A full nightly at 0.60 held adversarial at
+    // 5/5 and took escalation_correctness to 1.0. If that ever stops being
+    // true, this floor is the first thing to revisit.
+    expect(ESCALATION_HEADROOM_FLOOR).toBeGreaterThan(0.65);
   });
 
   it("lets each floor be overridden independently", async () => {

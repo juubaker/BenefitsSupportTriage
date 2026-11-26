@@ -56,7 +56,38 @@ export interface PgTriageServicesFactory {
 // Chosen from the retrieval sweep in evals/retrieval_eval.py: 0.65 is the
 // balanced peak on this corpus (recall 0.77, and every out-of-scope case
 // correctly returns nothing). 0.7+ discards a third of real evidence.
-const DEFAULT_MIN_SIMILARITY = 0.65;
+/**
+ * Measured, not guessed — evals/policy_floor.py scores each golden case's own
+ * required chunk_keys and reports the rank of each.
+ *
+ * At 0.65 only 37 of 43 required chunks were reachable. All six misses sat in a
+ * 0.017-wide band just under it (0.6322 to 0.6489), and one of them was
+ * base-04's chunk-maternity-02 at RANK 1 — the best match in the corpus,
+ * rejected by the floor. k was not the lever: k=5, 8 and 10 all returned the
+ * same 86%. At 0.60 recall is 100%.
+ *
+ * The counter-argument was escalation safety: a lower floor hands the ten cases
+ * that must escalate something citable, and a cited answer satisfies the
+ * empty-citation guard that makes them escalate. Measuring that too
+ * (escalation_headroom) showed the bounds cross — recall wants <= 0.6322,
+ * starving every escalation case wants > 0.6648 — so no single floor does both.
+ *
+ * The run settled it. adversarial-05 scores 0.6648 and was ALREADY above the
+ * 0.65 floor, retrieving a chunk and escalating correctly anyway: the floor is
+ * not what produces escalation, the model's judgement is. Going to 0.60 exposed
+ * two more escalation cases to marginal evidence (adversarial-02 at 0.6418,
+ * oos-03 at 0.6110) and a full nightly run moved
+ *
+ *   escalation_correctness   0.975 -> 1.000
+ *   grounding_recall         0.950 -> 1.000
+ *   tool_choice_correctness  0.975 -> 1.000
+ *   adversarial bucket       5/5   -> 5/5
+ *
+ * with no regression anywhere. Both corpora now sit at 0.60 by coincidence of
+ * measurement, not by sharing a constant: they were measured separately and may
+ * diverge again, so they stay separate.
+ */
+const DEFAULT_MIN_SIMILARITY = 0.6;
 
 /**
  * The resolved-ticket corpus needs a lower floor than the policy corpus, and
