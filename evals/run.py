@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import uuid
 from dataclasses import asdict, dataclass
 
@@ -241,12 +242,29 @@ class RunnerDeps:
     provider: str | None = None
 
 
-def execute_suite(suite: Suite, deps: RunnerDeps, golden_dir: str | None = None) -> dict:
+def execute_suite(
+    suite: Suite,
+    deps: RunnerDeps,
+    golden_dir: str | None = None,
+    progress: bool = True,
+) -> dict:
+    """Run and score every case in the suite.
+
+    Progress goes to stderr per case. A nightly suite is 42 real model runs
+    plus 42 judge calls — half an hour or more — and printing nothing until the
+    end is indistinguishable from a hang. stderr keeps stdout a clean JSON
+    document for anything piping the scorecard.
+    """
     cases = load_suite(suite, golden_dir)
     scores: list[CaseScore] = []
     judge_model = deps.judge_cfg.judge_model if (deps.with_judge and deps.judge_cfg) else None
+    total = len(cases)
+    started = time.monotonic()
 
-    for case in cases:
+    for i, case in enumerate(cases, 1):
+        if progress:
+            print(f"[{i}/{total}] {case.id} ...", end="", flush=True, file=sys.stderr)
+        case_began = time.monotonic()
         run_id, results = run_case(case, deps)
         persist_results(deps.conn, run_id, suite.value, case.id, results, judge_model)
         case_passed = all(r.passed for r in results)
@@ -261,6 +279,25 @@ def execute_suite(suite: Suite, deps: RunnerDeps, golden_dir: str | None = None)
                 requested_provider=requested,
                 observed_providers=observed,
             )
+        )
+        if progress:
+            elapsed = time.monotonic() - case_began
+            failed = [r.metric for r in results if not r.passed]
+            # The failing metric names go out live: on a long suite you want to
+            # know it is going wrong at case 3, not at minute 40.
+            verdict = "ok" if case_passed else "FAIL " + ",".join(failed)
+            eta = (time.monotonic() - started) / i * (total - i)
+            print(
+                f" {verdict} ({elapsed:.0f}s, ~{eta / 60:.0f}m left)",
+                flush=True,
+                file=sys.stderr,
+            )
+
+    if progress:
+        print(
+            f"done: {sum(1 for s in scores if s.passed)}/{total} in "
+            f"{(time.monotonic() - started) / 60:.1f}m",
+            file=sys.stderr,
         )
     return build_scorecard(scores, suite.value)
 
