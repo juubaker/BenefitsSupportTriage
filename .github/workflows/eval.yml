@@ -34,8 +34,7 @@ jobs:
 
       # --- agent/ sub-package: its own install (legacy peers for OTel), typecheck, tests ---
       - name: agent install
-        working-directory: agent
-        run: npm install --legacy-peer-deps
+        run: npm ci
       - name: agent typecheck
         working-directory: agent
         run: npm run typecheck
@@ -87,8 +86,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - name: agent install
-        working-directory: agent
-        run: npm install --legacy-peer-deps
+        run: npm ci
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: eval deps
