@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { AgentHarness } from "../harness.js";
+import { describeError } from "../describe-error.js";
 
 const bodySchema = z.object({
   ticketId: z.string().min(1),
@@ -14,27 +15,6 @@ const bodySchema = z.object({
  * Client disconnect (response close before a clean end) aborts the run via
  * AbortController -> terminal "aborted".
  */
-/**
- * Unwraps the `cause` chain so an error names what actually went wrong.
- * Postgres errors carry a SQLSTATE in `code`; a socket failure carries
- * ECONNREFUSED. Both are what you need, and both sit one level down.
- */
-function describeError(err: unknown): { message: string; cause?: string; code?: string } {
-  if (!(err instanceof Error)) return { message: "run failed" };
-  const out: { message: string; cause?: string; code?: string } = {
-    message: err.message.split("\n")[0],
-  };
-  const code = (err as { code?: unknown }).code;
-  if (typeof code === "string") out.code = code;
-  const cause = (err as { cause?: unknown }).cause;
-  if (cause instanceof Error) {
-    out.cause = cause.message.split("\n")[0];
-    const causeCode = (cause as { code?: unknown }).code;
-    if (typeof causeCode === "string") out.code = causeCode;
-  }
-  return out;
-}
-
 export type HarnessSource = AgentHarness | ((ticketId: string) => AgentHarness);
 
 export function triageRouter(source: HarnessSource): Router {

@@ -227,6 +227,14 @@ function EventLine({ event }) {
       );
     case 'loop_guard':
       return <span className="text-amber-400">⚠ loop guard: {data?.tool} ({data?.action})</span>;
+    // Without the reason this read as a second, unexplained run_started —
+    // which is exactly how the silent drop from Claude to llama3.1 hid.
+    case 'provider_failover':
+      return (
+        <span className="text-rose-400">
+          ⚠ {data?.from} failed, falling back to {data?.to} · {data?.reason}
+        </span>
+      );
     case 'compaction':
       return <span className="text-stone-500">⚠ compaction · ~{data?.droppedApproxTokens} tokens</span>;
     case 'model_delta':

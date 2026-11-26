@@ -67,6 +67,19 @@ export type AgentEvent =
   | { type: "tool_call"; step: number; name: string; args: unknown }
   | { type: "tool_result"; step: number; name: string; summary: string; isError: boolean }
   | { type: "loop_guard"; step: number; tool: string; action: "nudged" | "forcing_final" | "final_rejected" }
+  /**
+   * The primary provider failed and the run restarted on the fallback. Carries
+   * the reason: before this event existed the error was swallowed unless OTLP
+   * tracing happened to be on, so a run that silently dropped from Claude to
+   * llama3.1 looked identical to one that chose llama3.1.
+   */
+  | {
+      type: "provider_failover";
+      from: ProviderName;
+      to: ProviderName;
+      step: number;
+      reason: string;
+    }
   | { type: "compaction"; step: number; droppedApproxTokens: number }
   | { type: "step_completed"; record: StepRecord }
   | { type: "terminal"; state: TerminalState; result?: TriageResult };
