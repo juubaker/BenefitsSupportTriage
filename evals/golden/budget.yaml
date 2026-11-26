@@ -34,6 +34,18 @@ cases:
     trajectory: { required_tools: ["search_policies", "triage_ticket"], max_steps: 6, min_retrieval_calls: 1, token_ceiling: 40000 }
     reasoning_rubric: "Prioritizes the time-sensitive spouse-coverage QLE the user flagged as urgent."
 
+  # KNOWN BORDERLINE, and the only case that moves between runs. The surface
+  # question ("which copay tiers do these fall into") reads low; the framing
+  # ("before open enrollment so I can pick the right plan", "I am on a generic
+  # maintenance drug ... a specialty injectable") reads medium. The agent has
+  # answered each about half the time across four runs on the same code, and a
+  # rubric note telling it to judge context over phrasing helped without
+  # settling it.
+  #
+  # medium is correct, so the label stays. Do not relabel this to make a gate
+  # green: a case that flips between runs is evidence the rubric's low/medium
+  # boundary is still too soft for a ticket that is both, and the fix belongs
+  # in PRIORITY_GUIDANCE. Nightly runs at --min-pass-rate 0.95 for this reason.
   - id: budget-03
     bucket: budget
     subject: "Long pharmacy question"
