@@ -14,7 +14,9 @@ import requests  # type: ignore
 from trajectory_judge import default_judge_config
 from run import RunnerDeps
 
-APP_URL = os.environ.get("AGENT_APP_URL", "http://localhost:3000")
+# The dev server listens on 3001 (server/index.js: PORT ?? 3001). This default
+# said 3000, which cost a full suite run and eighty lines of urllib3 traceback.
+APP_URL = os.environ.get("AGENT_APP_URL", "http://localhost:3001")
 DB_URL = os.environ["DATABASE_URL"]
 
 

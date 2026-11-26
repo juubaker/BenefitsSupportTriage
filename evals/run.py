@@ -69,6 +69,70 @@ def observed_providers(conn, run_id: str) -> tuple[str, str, tuple[str, ...]]:
     return requested or "", model or "", tuple(sorted(observed or ()))
 
 
+def preflight(deps: "RunnerDeps") -> str | None:
+    """Check the app and the DB answer before spending a suite on finding out.
+
+    A wrong APP_URL surfaced as eighty lines of urllib3 traceback on case one,
+    with the actual problem — port 3000 in wiring.py against a server on 3001 —
+    named only in the innermost frame. Returns a one-line problem description,
+    or None when everything answers.
+    """
+    import os as _os
+
+    app_url = _os.environ.get("AGENT_APP_URL", "http://localhost:3001")
+
+    try:
+        with deps.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM policy_chunks")
+            chunks = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM resolved_tickets")
+            tickets = cur.fetchone()[0]
+    except Exception as err:  # noqa: BLE001 — any DB failure is the same answer here
+        return f"database unreachable or un-migrated: {type(err).__name__}: {err}"
+    if chunks == 0:
+        return "policy_chunks is empty — run the rag ingest before scoring retrieval"
+
+    try:
+        import requests  # type: ignore
+
+        resp = requests.get(f"{app_url}/api/health", timeout=5)
+    except Exception as err:  # noqa: BLE001
+        return (
+            f"app unreachable at {app_url} ({type(err).__name__}). "
+            "Set AGENT_APP_URL to the port the server actually listens on "
+            "(the dev server defaults to 3001, wiring.py's default is 3000), "
+            "and check that `npm run dev` is up."
+        )
+    if resp.status_code != 200:
+        return f"{app_url}/api/health returned {resp.status_code}"
+
+    health = {}
+    try:
+        health = resp.json()
+    except ValueError:
+        pass
+    agent = health.get("agent") or {}
+    if agent and agent.get("mounted") is False:
+        return (
+            f"the agent is not mounted on {app_url} — POST /api/triage would answer 503. "
+            "Run `npm run agent:build`, then restart the server."
+        )
+    providers = agent.get("providers") or []
+    if deps.provider and providers and deps.provider not in providers:
+        return (
+            f"--provider {deps.provider} is not configured on the server "
+            f"(it reports {providers}). Every case would fail on a pinned provider "
+            "that does not exist."
+        )
+
+    print(
+        f"preflight ok — app {app_url}, providers {providers or 'unreported'}, "
+        f"{chunks} policy chunks, {tickets} resolved tickets"
+        + (f", pinned to {deps.provider}" if deps.provider else "")
+    )
+    return None
+
+
 def _traceparent(trace_id: str, span_id: str) -> str:
     return f"00-{trace_id}-{span_id}-01"
 
@@ -200,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="pin every run to this provider instead of taking the server "
                              "default. A pinned run does not fail over, so a provider error "
                              "fails the case rather than being scored on the fallback.")
+    parser.add_argument("--skip-preflight", action="store_true",
+                        help="run the suite without first checking that the app and DB answer")
     parser.add_argument("--allow-failover", action="store_true",
                         help="score a suite whose runs fell back to another provider. "
                              "Off by default: a mixed-provider scorecard measures nothing, "
@@ -216,6 +282,13 @@ def main(argv: list[str] | None = None) -> int:
     deps = build_runner_deps(with_judge=(suite is Suite.NIGHTLY))
     # Assigned rather than passed, so an existing wiring.py keeps its signature.
     deps.provider = args.provider
+
+    if not args.skip_preflight:
+        problem = preflight(deps)
+        if problem:
+            print(f"PREFLIGHT FAILED: {problem}", file=sys.stderr)
+            return 2
+
     scorecard = execute_suite(suite, deps)
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
