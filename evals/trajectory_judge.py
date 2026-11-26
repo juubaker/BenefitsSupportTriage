@@ -159,7 +159,15 @@ def reasoning_quality(
 
 
 def default_judge_config() -> JudgeConfig:
+    """Defaults to a local llama judge against a Claude worker.
+
+    The previous default, gpt-4o-mini, needed an OpenAI key this project has
+    never had, so --suite nightly could not run as shipped. llama3.1 is a
+    different family from the worker (which is the constraint that matters),
+    already installed for the fallback provider, and free — so the judge costs
+    nothing and the separation is real rather than nominal.
+    """
     worker_family = os.environ.get("AGENT_WORKER_FAMILY", "claude")
-    judge_model = os.environ.get("EVAL_JUDGE_MODEL", "gpt-4o-mini")
-    judge_family = os.environ.get("EVAL_JUDGE_FAMILY", "gpt")
+    judge_model = os.environ.get("EVAL_JUDGE_MODEL", "llama3.1")
+    judge_family = os.environ.get("EVAL_JUDGE_FAMILY", "llama")
     return JudgeConfig(worker_family, judge_model, judge_family)

@@ -11,6 +11,7 @@ import time
 import psycopg  # type: ignore
 import requests  # type: ignore
 
+from judge_client import make_judge_call
 from trajectory_judge import default_judge_config
 from run import RunnerDeps
 
@@ -62,19 +63,15 @@ def _load_scratch_and_final(conn, run_id: str):
     return scratch, final
 
 
-def _judge_call(prompt: str) -> str:
-    """Call the judge model — different family than the worker (spec §8).
-    Swap this body for your OpenAI/Anthropic/other client as configured."""
-    raise NotImplementedError("wire your judge model client here")
-
-
 def build_runner_deps(with_judge: bool) -> RunnerDeps:
     conn = psycopg.connect(DB_URL)
     return RunnerDeps(
         conn=conn,
         trigger_run=_trigger_run,
         with_judge=with_judge,
-        judge_call=_judge_call if with_judge else None,
+        # judge_client.make_judge_call() is a real client now; the judge family
+        # must differ from the worker's, which JudgeConfig.validate() enforces.
+        judge_call=make_judge_call() if with_judge else None,
         judge_cfg=default_judge_config() if with_judge else None,
         load_scratch_and_final=(lambda rid: _load_scratch_and_final(conn, rid)) if with_judge else None,
     )
