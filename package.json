@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@triage/embeddings": "*",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.2",
@@ -88,6 +89,7 @@
     "node": ">=20.0.0"
   },
   "workspaces": [
+    "packages/*",
     "agent",
     "rag"
   ]

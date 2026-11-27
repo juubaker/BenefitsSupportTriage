@@ -1,0 +1,28 @@
+{
+  "name": "@triage/embeddings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One embedding client for the agent, the ingest pipeline and the v1 server.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.2"
+  }
+}
