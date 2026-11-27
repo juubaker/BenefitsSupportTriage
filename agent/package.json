@@ -26,6 +26,7 @@
     "@opentelemetry/sdk-trace-base": "^2.1.0",
     "@opentelemetry/sdk-trace-node": "^2.1.0",
     "@opentelemetry/semantic-conventions": "^1.37.0",
+    "@triage/embeddings": "*",
     "drizzle-orm": "^0.45.2",
     "express": "^5.1.0",
     "pg": "^8.22.0",

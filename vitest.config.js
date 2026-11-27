@@ -15,9 +15,10 @@ export default defineConfig({
     // be covered here. agent/ and rag/ are excluded below, so their own .ts
     // suites are not pulled in.
     include: ['**/*.{test,spec}.{js,jsx,ts,tsx}'],
-    // agent/ and rag/ are separate packages with their own runners; never
-    // descend into them (or any nested node_modules) from the root suite.
-    exclude: ['**/node_modules/**', '**/dist/**', '.idea', '.git', '.cache', 'agent/**', 'rag/**', 'evals/**'],
+    // agent/, rag/ and packages/* are separate workspaces with their own
+    // runners; never descend into them (or any nested node_modules) from the
+    // root suite, or their tests run twice and are counted twice.
+    exclude: ['**/node_modules/**', '**/dist/**', '.idea', '.git', '.cache', 'agent/**', 'rag/**', 'packages/**', 'evals/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],

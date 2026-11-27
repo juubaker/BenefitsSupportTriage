@@ -61,6 +61,7 @@ mounts its SSE route, and the reviewer UI's agent panel streams from it. See
 | `src/index.ts` | MCP server: tools, resources, prompt |
 | `agent/` | v2 agent: harness, loop, budgeter, registry, tracing, providers, graph layer, pgvector services. Own `package.json` |
 | `rag/` | Corpus schema, chunking and ingest pipeline. Own `package.json` |
+| `packages/embeddings/` | One embedding client for every consumer: Ollama and Voyage, single and batch, with the corpus width validated |
 | `evals/` | Python eval sidecar: ten metrics over 40 golden cases, plus `policy_floor.py` and `ticket_floor.py`, which measure what the retrieval thresholds can actually reach |
 | `observability/` | OTel collector, Jaeger and Prometheus compose stack |
 | `docs/demo.md` | End-to-end walkthrough of the running system |
@@ -222,6 +223,7 @@ npm test --workspace agent                           # agent package: 117 passed
 npm test --workspace rag                             # rag package: 4
 (cd agent && npx tsc --noEmit)                       # agent typecheck
 npm run typecheck --workspace rag                    # rag typecheck
+npm test --workspace @triage/embeddings              # shared embedder: 18
 (cd evals && python -m pytest -q \
     --ignore=test_rag_metrics.py)                    # eval harness: 64
 (cd agent && npm run provider-check)                 # one real call per configured provider
