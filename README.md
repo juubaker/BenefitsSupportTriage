@@ -221,6 +221,7 @@ npm test                                             # web UI + Express API: 149
 npm test --workspace agent                           # agent package: 117 passed, 1 skipped
 npm test --workspace rag                             # rag package: 4
 (cd agent && npx tsc --noEmit)                       # agent typecheck
+npm run typecheck --workspace rag                    # rag typecheck
 (cd evals && python -m pytest -q \
     --ignore=test_rag_metrics.py)                    # eval harness: 64
 (cd agent && npm run provider-check)                 # one real call per configured provider

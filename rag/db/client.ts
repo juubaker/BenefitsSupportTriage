@@ -7,8 +7,8 @@
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import * as schema from "./schema";
-import { COMPOSE_DATABASE_URL, resolveDatabaseUrl } from "./database-url";
+import * as schema from "./schema.js";
+import { COMPOSE_DATABASE_URL, resolveDatabaseUrl } from "./database-url.js";
 
 const { url, source } = resolveDatabaseUrl();
 if (source !== "environment") {

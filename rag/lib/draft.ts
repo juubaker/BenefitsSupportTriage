@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { db } from "../db/client";
-import { retrievalLog } from "../db/schema";
-import { retrieve, type RetrievalResult } from "./retrieval";
-import { DRAFT_MODEL, MIN_SIMILARITY } from "./config";
+import { db } from "../db/client.js";
+import { retrievalLog } from "../db/schema.js";
+import { retrieve, type RetrievalResult } from "./retrieval.js";
+import { DRAFT_MODEL, MIN_SIMILARITY } from "./config.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 

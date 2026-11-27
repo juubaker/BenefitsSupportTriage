@@ -25,7 +25,7 @@ export const COMPOSE_DATABASE_URL = "postgres://triage:triage@localhost:5433/tri
  * from rag/, which is the difference that caused the original bug.
  */
 function loadEnvFile(): string | undefined {
-  let dir = resolve(__dirname, "..");
+  let dir = resolve(import.meta.dirname, "..");
   for (let i = 0; i < 6; i += 1) {
     const candidate = join(dir, ".env");
     if (existsSync(candidate)) {

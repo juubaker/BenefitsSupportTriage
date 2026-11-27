@@ -15,12 +15,12 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { eq } from "drizzle-orm";
-import { db } from "../db/client";
-import { policyChunks, resolvedTickets } from "../db/schema";
-import { chunkText } from "../lib/chunk";
-import { embed } from "../lib/embeddings";
+import { db } from "../db/client.js";
+import { policyChunks, resolvedTickets } from "../db/schema.js";
+import { chunkText } from "../lib/chunk.js";
+import { embed } from "../lib/embeddings.js";
 
-const DOCS_DIR = join(__dirname, "..", "docs");
+const DOCS_DIR = join(import.meta.dirname, "..", "docs");
 const POLICY_DIR = join(DOCS_DIR, "policies");
 
 async function ingestPolicies() {

@@ -1,13 +1,14 @@
 {
   "name": "benefits-triage-rag",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "db:enable": "psql \"$DATABASE_URL\" -f db/0000_enable_pgvector.sql",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "ingest": "tsx scripts/ingest.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",
