@@ -4,7 +4,7 @@ import {
   OLLAMA_URL,
   OLLAMA_EMBED_MODEL,
   VOYAGE_EMBED_MODEL,
-} from "./config";
+} from "./config.js";
 
 /**
  * Returns a single embedding vector for a piece of text.

@@ -1,8 +1,8 @@
 import { cosineDistance, desc, gt, sql } from "drizzle-orm";
-import { db } from "../db/client";
-import { policyChunks, resolvedTickets } from "../db/schema";
-import { embed } from "./embeddings";
-import { PRECEDENT_K, POLICY_K, MIN_SIMILARITY } from "./config";
+import { db } from "../db/client.js";
+import { policyChunks, resolvedTickets } from "../db/schema.js";
+import { embed } from "./embeddings.js";
+import { PRECEDENT_K, POLICY_K, MIN_SIMILARITY } from "./config.js";
 
 export interface PolicyHit {
   id: number;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMPOSE_DATABASE_URL, resolveDatabaseUrl } from "./database-url";
+import { COMPOSE_DATABASE_URL, resolveDatabaseUrl } from "./database-url.js";
 
 describe("resolveDatabaseUrl", () => {
   const noEnvFile = (): undefined => undefined;

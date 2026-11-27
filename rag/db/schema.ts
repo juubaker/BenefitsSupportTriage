@@ -7,7 +7,7 @@ import {
   index,
   real,
 } from "drizzle-orm/pg-core";
-import { EMBED_DIM } from "../lib/config";
+import { EMBED_DIM } from "../lib/config.js";
 
 /**
  * PRECEDENT CORPUS

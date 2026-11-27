@@ -1,4 +1,4 @@
-import { retrieve } from "../lib/retrieval";
+import { retrieve } from "../lib/retrieval.js";
 
 async function main() {
   const q = process.argv.slice(2).join(" ") || "Can I add my spouse after getting married?";

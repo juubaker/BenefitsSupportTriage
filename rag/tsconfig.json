@@ -3,13 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "outDir": "dist",
-    "rootDir": "src",
+    "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "declaration": false
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["lib/**/*.ts", "db/**/*.ts", "scripts/**/*.ts", "drizzle.config.ts"]
 }
