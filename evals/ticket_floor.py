@@ -51,12 +51,20 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b)))
 
 
-def load_tickets() -> list[tuple[int, str, str, list[float]]]:
+def load_tickets() -> list[tuple[str, str, str, list[float]]]:
+    """Returns (cited_id, category, case_text, embedding).
+
+    cited_id is ticket_key when the row has one, matching what the agent
+    actually cites. Falling back to R-<serial id> mirrors the agent, and is
+    why the ids in this script's output used to move between runs: the ingest
+    deleted every row, so the sequence advanced each time.
+    """
     with psycopg.connect(DATABASE_URL) as conn:
         rows = conn.execute(
-            "select id, category, case_text, embedding::text from resolved_tickets order by id"
+            "select id, ticket_key, category, case_text, embedding::text "
+            "from resolved_tickets order by coalesce(ticket_key, id::text)"
         ).fetchall()
-    return [(i, c, t, json.loads(e)) for i, c, t, e in rows]
+    return [(k or f"R-{i}", c, t, json.loads(e)) for i, k, c, t, e in rows]
 
 
 def main() -> None:
@@ -76,7 +84,7 @@ def main() -> None:
         scored = [(cosine(q, vec), tid, cat, text) for tid, cat, text, vec in tickets]
         scored.sort(reverse=True)
         best, tid, cat, text = scored[0]
-        tops.append((case.id, best, tid, f"[{cat}] {text[:70]}"))
+        tops.append((case.id, best, tid, f"[{cat}] {text[:46]}"))
 
     scores = sorted(s for _, s, _, _ in tops)
     n = len(scores)
@@ -105,7 +113,7 @@ def main() -> None:
     if args.show:
         print(f"\ntop match per case (first {args.show})")
         for cid, best, tid, snippet in tops[: args.show]:
-            print(f"  {cid:<16} {best:.4f}  R-{tid}  {snippet}")
+            print(f"  {cid:<16} {best:.4f}  {tid:<38} {snippet}")
 
 
 if __name__ == "__main__":

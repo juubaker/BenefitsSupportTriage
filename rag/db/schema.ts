@@ -5,6 +5,7 @@ import {
   timestamp,
   vector,
   index,
+  uniqueIndex,
   real,
 } from "drizzle-orm/pg-core";
 import { EMBED_DIM } from "../lib/config.js";
@@ -20,6 +21,21 @@ export const resolvedTickets = pgTable(
   "resolved_tickets",
   {
     id: serial("id").primaryKey(),
+    /**
+     * Stable, model-visible id, authored in resolved-tickets.json.
+     *
+     * Citations used to be "R-<serial id>", and the ingest deletes every row
+     * before re-inserting, so the sequence advanced each run: the same ticket
+     * was R-48, then R-117, then R-135. The row count never changed, which is
+     * why it went unnoticed — but every R- id stored in triage_results pointed
+     * at a different ticket afterwards, or at nothing. For a reviewer opening
+     * an older decision, that is the one thing an audit trail must not do.
+     *
+     * policy_chunks already had chunk_key for exactly this reason, which is
+     * why "chunk-qle-12" survives a re-ingest and grounding_recall can be
+     * measured against the golden set at all. This is that, for precedent.
+     */
+    ticketKey: text("ticket_key"),
     caseText: text("case_text").notNull(),
     category: text("category").notNull(),
     approvedResponse: text("approved_response").notNull(),
@@ -32,6 +48,8 @@ export const resolvedTickets = pgTable(
       "hnsw",
       t.embedding.op("vector_cosine_ops")
     ),
+    // Unique so the ingest can upsert on it, which also keeps ids stable.
+    ticketKeyIdx: uniqueIndex("resolved_tickets_ticket_key_idx").on(t.ticketKey),
   })
 );
 

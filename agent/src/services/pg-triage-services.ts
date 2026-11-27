@@ -115,8 +115,16 @@ export function policyChunkId(row: { id: number | string; chunk_key?: string | n
   return row.chunk_key ? String(row.chunk_key) : `chunk-${row.id}`;
 }
 
-export function resolvedTicketId(row: { id: number | string }): string {
-  return `R-${row.id}`;
+/**
+ * Stable, model-visible id for a resolved ticket, mirroring policyChunkId.
+ *
+ * ticket_key is authored in resolved-tickets.json and survives a re-ingest.
+ * The `R-${id}` fallback is for rows ingested before keys existed: the serial
+ * id moves every time the corpus is rebuilt, so a citation made from it is
+ * only meaningful until the next ingest.
+ */
+export function resolvedTicketId(row: { id: number | string; ticket_key?: string | null }): string {
+  return row.ticket_key ? String(row.ticket_key) : `R-${row.id}`;
 }
 
 export function createPgTriageServices(opts: PgTriageServicesOptions): PgTriageServicesFactory {
@@ -156,11 +164,12 @@ export function createPgTriageServices(opts: PgTriageServicesOptions): PgTriageS
     const vector = toVectorLiteral(await embed(query));
     const { rows } = await db.query<{
       id: number;
+      ticket_key: string | null;
       category: string;
       approved_response: string;
       similarity: string | number;
     }>(
-      `SELECT id, category, approved_response,
+      `SELECT id, ticket_key, category, approved_response,
               1 - (embedding <=> $1::vector) AS similarity
          FROM resolved_tickets
         WHERE 1 - (embedding <=> $1::vector) > $2

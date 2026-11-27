@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   createPgTriageServices,
+  policyChunkId,
+  resolvedTicketId,
   type Queryable,
   type QueryResult,
 } from "../src/services/pg-triage-services.js";
@@ -581,5 +583,53 @@ describe("the two corpora get separately measured floors", () => {
 
     expect(spec?.description).toMatch(/ticket's own wording/);
     expect(spec?.description).toMatch(/not keywords/);
+  });
+});
+
+describe("stable precedent ids", () => {
+  function recordingDb() {
+    const calls: Array<{ text: string; params: unknown[] }> = [];
+    return {
+      calls,
+      async query<R>(text: string, params: unknown[] = []) {
+        calls.push({ text, params });
+        return { rows: [] as R[] };
+      },
+    };
+  }
+  const embed = async () => [0.1, 0.2, 0.3];
+
+  it("cites ticket_key when there is one", () => {
+    // The whole point: the same ticket was R-48, then R-117, then R-135,
+    // because the ingest deleted every row and the serial sequence advanced.
+    expect(resolvedTicketId({ id: 135, ticket_key: "R-spouse-job-loss" })).toBe(
+      "R-spouse-job-loss",
+    );
+  });
+
+  it("falls back to the serial id for rows ingested before keys existed", () => {
+    expect(resolvedTicketId({ id: 48 })).toBe("R-48");
+    expect(resolvedTicketId({ id: 48, ticket_key: null })).toBe("R-48");
+  });
+
+  it("treats an empty key as absent rather than citing an empty string", () => {
+    expect(resolvedTicketId({ id: 7, ticket_key: "" })).toBe("R-7");
+  });
+
+  it("mirrors how policyChunkId already prefers chunk_key", () => {
+    // Policy chunks had this from the start, which is why chunk-qle-12
+    // survives a re-ingest and grounding_recall can be measured at all.
+    expect(policyChunkId({ id: 51, chunk_key: "chunk-qle-12" })).toBe("chunk-qle-12");
+    expect(policyChunkId({ id: 51 })).toBe("chunk-51");
+  });
+
+  it("selects ticket_key, or every citation would fall back", async () => {
+    const db = recordingDb();
+    const services = createPgTriageServices({ db, embed }).forTicket({ ticketId: "T-1" });
+    await services.findSimilarTickets("my spouse lost her job", 3);
+
+    const sql = db.calls[0].text;
+    expect(sql).toContain("FROM resolved_tickets");
+    expect(sql).toContain("ticket_key");
   });
 });
