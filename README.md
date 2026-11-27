@@ -79,7 +79,7 @@ git clone https://github.com/juubaker/BenefitsSupportTriage.git
 cd BenefitsSupportTriage
 cp .env.example .env                # set ANTHROPIC_API_KEY if you have one
 
-npm ci
+npm ci                              # root, agent/ and rag/ — one npm workspace
 npm run db:setup                    # starts Postgres (host port 5433), migrates, seeds
 npm run dev                         # API on :3001, UI on the Vite URL it prints
 ```
@@ -88,9 +88,13 @@ Load the RAG corpora (policy chunks and resolved tickets) before using
 grounded drafts or the MCP retrieval tools:
 
 ```bash
-cd rag && npm ci
-npm run db:enable && npm run db:migrate && npm run ingest
+npm run db:enable --workspace rag
+npm run db:migrate --workspace rag
+npm run ingest --workspace rag
 ```
+
+The ingest reads `DATABASE_URL` from the root `.env`, and falls back to the
+compose URL when there isn't one, so this works on a fresh clone.
 
 Then apply the agent's tables:
 
@@ -146,7 +150,7 @@ build is present; the reviewer UI's agent panel calls it. Build it, then start
 the server as usual:
 
 ```bash
-npm run agent:install && npm run agent:build
+npm run agent:build                     # installed already by the root npm ci
 npm run dev                             # agent mounted; AGENT_ENABLED=false to skip
 ```
 
@@ -155,7 +159,7 @@ rest of the API is unaffected. To run a single ticket through the loop from the
 command line instead:
 
 ```bash
-cd agent && npm ci --legacy-peer-deps
+cd agent
 npm run smoke -- --fake                 # scripted provider, no model: checks loop mechanics
 npm run smoke                           # a real model on local Ollama
 npm run smoke -- --provider anthropic   # same, on Claude (needs ANTHROPIC_API_KEY)
@@ -214,7 +218,9 @@ Each line is run from the repository root:
 
 ```bash
 npm test                                             # web UI + Express API: 149 passed, 6 skipped
-(cd agent && npx vitest run && npx tsc --noEmit)     # agent package: 99 passed, 1 skipped
+npm test --workspace agent                           # agent package: 117 passed, 1 skipped
+npm test --workspace rag                             # rag package: 4
+(cd agent && npx tsc --noEmit)                       # agent typecheck
 (cd evals && python -m pytest -q \
     --ignore=test_rag_metrics.py)                    # eval harness: 64
 (cd agent && npm run provider-check)                 # one real call per configured provider
