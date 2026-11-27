@@ -14,7 +14,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, extname, basename } from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { policyChunks, resolvedTickets } from "../db/schema.js";
 import { chunkText } from "../lib/chunk.js";
@@ -67,24 +67,64 @@ async function ingestTickets() {
     return;
   }
   const rows = JSON.parse(readFileSync(path, "utf8")) as {
+    key?: string;
     caseText: string;
     category: string;
     approvedResponse: string;
   }[];
 
-  // resolved-tickets.json is the single source of truth here — replace
-  // rather than append, so re-running ingest doesn't duplicate rows.
-  await db.delete(resolvedTickets);
+  const missing = rows.filter((r) => !r.key?.trim()).length;
+  if (missing > 0) {
+    throw new Error(
+      `${missing} ticket(s) in resolved-tickets.json have no "key". Citations are ` +
+        `"R-<key>", and without one a ticket is cited by serial id, which changes ` +
+        `on every ingest. Give each ticket a stable key such as "R-spouse-job-loss".`,
+    );
+  }
+  const keys = rows.map((r) => r.key!.trim());
+  const duplicates = keys.filter((k, i) => keys.indexOf(k) !== i);
+  if (duplicates.length > 0) {
+    // The upsert below would silently collapse them into one row.
+    throw new Error(`Duplicate ticket key(s) in resolved-tickets.json: ${[...new Set(duplicates)].join(", ")}`);
+  }
 
+  // Upsert on the key rather than delete-all-then-insert. Deleting advanced
+  // the serial sequence every run, so the same ticket's id kept changing and
+  // any R-<id> stored in triage_results stopped meaning anything. Keyed rows
+  // now keep their id across re-ingests.
   for (const r of rows) {
     const embedding = await embed(r.caseText); // embed the QUESTION, not the answer
-    await db.insert(resolvedTickets).values({
-      caseText: r.caseText,
-      category: r.category,
-      approvedResponse: r.approvedResponse,
-      embedding,
-    });
+    await db
+      .insert(resolvedTickets)
+      .values({
+        ticketKey: r.key!.trim(),
+        caseText: r.caseText,
+        category: r.category,
+        approvedResponse: r.approvedResponse,
+        embedding,
+      })
+      .onConflictDoUpdate({
+        target: resolvedTickets.ticketKey,
+        set: {
+          caseText: r.caseText,
+          category: r.category,
+          approvedResponse: r.approvedResponse,
+          embedding,
+        },
+      });
   }
+
+  // Anything left without a key predates this and can no longer be cited
+  // stably, so it goes — including the rows the old delete-all would have
+  // removed anyway.
+  const removed = await db
+    .delete(resolvedTickets)
+    .where(isNull(resolvedTickets.ticketKey))
+    .returning({ id: resolvedTickets.id });
+  if (removed.length > 0) {
+    console.log(`  removed ${removed.length} unkeyed row(s) from earlier ingests.`);
+  }
+
   console.log(`Ticket ingest complete: ${rows.length} precedents.`);
 }
 

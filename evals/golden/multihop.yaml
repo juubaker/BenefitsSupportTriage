@@ -12,7 +12,7 @@ cases:
   # out to be right. A move out of the HMO service area is resolved by SWITCHING
   # plans, and CATEGORY_BOUNDARIES defines enrollment as an action on coverage
   # "(add, drop, switch)"; eligibility would fit if only the HSA hop were asked.
-  # It is also a QLE with a 31-day window (see resolved ticket R-54), and
+  # It is also a QLE with a 31-day window (see R-move-out-of-service-area), and
   # PRIORITY_GUIDANCE puts a running deadline at high, reserving medium for
   # "no deadline running". The old labels contradicted both rubrics, the
   # precedent corpus, and sibling case multihop-09 on the same event.

@@ -25,7 +25,15 @@ export const COMPOSE_DATABASE_URL = "postgres://triage:triage@localhost:5433/tri
  * from rag/, which is the difference that caused the original bug.
  */
 function loadEnvFile(): string | undefined {
-  let dir = resolve(import.meta.dirname, "..");
+  // import.meta.dirname is undefined wherever this module is loaded as
+  // CommonJS, which is how drizzle-kit loads drizzle.config.ts: it transpiles
+  // the config rather than importing it as ESM. Reaching resolve() with
+  // undefined threw `The "paths[0]" argument must be of type string`, so the
+  // config failed for a reason that had nothing to do with the database.
+  // cwd is the right fallback: every script here runs from the package or the
+  // repo root, and the walk upward covers both.
+  const here = typeof import.meta.dirname === "string" ? import.meta.dirname : process.cwd();
+  let dir = resolve(here, "..");
   for (let i = 0; i < 6; i += 1) {
     const candidate = join(dir, ".env");
     if (existsSync(candidate)) {

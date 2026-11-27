@@ -51,3 +51,21 @@ describe("resolveDatabaseUrl", () => {
     }
   });
 });
+
+describe("loadEnvFile robustness", () => {
+  it("resolves without import.meta.dirname", async () => {
+    // drizzle-kit transpiles drizzle.config.ts rather than importing it as
+    // ESM, so import.meta.dirname is undefined there. Reaching resolve() with
+    // undefined threw `The "paths[0]" argument must be of type string`, and
+    // db:migrate failed for a reason unrelated to the database.
+    const previous = process.env.DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    try {
+      const mod = await import("./database-url.js");
+      expect(() => mod.resolveDatabaseUrl({} as NodeJS.ProcessEnv)).not.toThrow();
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previous;
+    }
+  });
+});
